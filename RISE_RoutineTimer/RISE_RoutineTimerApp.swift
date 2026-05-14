@@ -7,12 +7,17 @@
 
 import SwiftUI
 import SwiftData
+import CoreText
 
 @main
 struct RISE_RoutineTimerApp: App {
+    init() {
+        registerBundledFonts()
+    }
+
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            RoutineStep.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
@@ -29,4 +34,12 @@ struct RISE_RoutineTimerApp: App {
         }
         .modelContainer(sharedModelContainer)
     }
+}
+
+private func registerBundledFonts() {
+    guard let url = Bundle.main.url(forResource: "Fake Receipt", withExtension: "otf") else {
+        return
+    }
+
+    CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
 }

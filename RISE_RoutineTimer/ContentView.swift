@@ -2,60 +2,63 @@
 //  ContentView.swift
 //  RISE_RoutineTimer
 //
-//  Created by Izhan S Ansari on 5/13/26.
+//  The root screen owns the saved routine query and shows the two main tabs.
 //
 
-import SwiftUI
 import SwiftData
+import SwiftUI
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @Query(sort: \RoutineStep.sortOrder, order: .forward) private var steps: [RoutineStep]
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
+        TabView {
+            RoutineTimerView(steps: steps)
+                .tabItem {
+                    Label("Run", systemImage: "timer")
                 }
-                .onDelete(perform: deleteItems)
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
+
+            RoutineListView(steps: steps)
+                .tabItem {
+                    Label("Edit", systemImage: "list.bullet")
                 }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
-            }
-        } detail: {
-            Text("Select an item")
+        }
+        .task {
+            seedStarterRoutineIfNeeded()
         }
     }
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
+    private func seedStarterRoutineIfNeeded() {
+        guard steps.isEmpty else {
+            return
         }
+
+        for (index, seed) in RoutineStep.starterRoutine.enumerated() {
+            let step = RoutineStep(
+                title: seed.title,
+                durationSeconds: seed.durationSeconds,
+                autoNext: seed.autoNext,
+                notes: seed.notes,
+                sortOrder: index
+            )
+
+            modelContext.insert(step)
+        }
+
+        saveChanges()
     }
 
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
+    private func saveChanges() {
+        do {
+            try modelContext.save()
+        } catch {
+            print("Could not save starter routine: \(error)")
         }
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+        .modelContainer(for: RoutineStep.self, inMemory: true)
 }
