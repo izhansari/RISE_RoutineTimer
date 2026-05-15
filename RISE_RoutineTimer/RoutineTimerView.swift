@@ -51,6 +51,7 @@ struct RoutineTimerView: View {
     @State private var accumulatedRoutineDeltaSeconds = 0
     @State private var timerTask: Task<Void, Never>?
     @State private var now = Date()
+    @State private var showingNotes = false
 
     var body: some View {
         NavigationStack {
@@ -136,45 +137,21 @@ struct RoutineTimerView: View {
             VStack(spacing: 0) {
                 Divider()
 
-                VStack(spacing: 10) {
-                    Button(action: toggleRunning) {
-                        HStack(spacing: 10) {
-                            Image(systemName: primaryButtonIcon)
-                                .font(.system(size: 17))
-                            Text(primaryButtonTitle.uppercased())
-                                .font(analogFont(22))
-                                .tracking(2)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 58)
-                        .background(Color.primary)
-                        .foregroundStyle(Color(.systemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                Button(action: toggleRunning) {
+                    HStack(spacing: 10) {
+                        Image(systemName: primaryButtonIcon)
+                            .font(.system(size: 17))
+                        Text(primaryButtonTitle.uppercased())
+                            .font(analogFont(22))
+                            .tracking(2)
                     }
-                    .buttonStyle(.plain)
-
-                    HStack(spacing: 0) {
-                        Button(action: previousStep) {
-                            Label("Back", systemImage: "backward.fill")
-                        }
-                        .disabled(!canGoPrevious)
-                        .frame(maxWidth: .infinity)
-
-                        Button(action: resetRoutine) {
-                            Label("Reset", systemImage: "arrow.counterclockwise")
-                        }
-                        .frame(maxWidth: .infinity)
-
-                        Button(action: nextStep) {
-                            Label("Skip", systemImage: "forward.fill")
-                        }
-                        .disabled(isComplete)
-                        .frame(maxWidth: .infinity)
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 58)
+                    .background(Color.primary)
+                    .foregroundStyle(Color(.systemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
+                .buttonStyle(.plain)
                 .padding(.horizontal, 24)
                 .padding(.vertical, 14)
             }
@@ -202,7 +179,10 @@ struct RoutineTimerView: View {
                 .ignoresSafeArea()
 
                 let d = min(144, geo.size.width * 0.37)
-                Button(action: nextStep) {
+                Button {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    nextStep()
+                } label: {
                     Image(systemName: "checkmark")
                         .font(.system(size: d * 0.46, weight: .medium))
                         .foregroundStyle(Color.black)
@@ -220,6 +200,17 @@ struct RoutineTimerView: View {
                     )
                 )
             }
+        }
+        .sheet(isPresented: $showingNotes) {
+            let notes = currentStep?.notes ?? ""
+            ScrollView {
+                Text(notes)
+                    .font(analogFont(22))
+                    .multilineTextAlignment(.center)
+                    .padding(32)
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
     }
 
@@ -267,18 +258,6 @@ struct RoutineTimerView: View {
 
             Spacer()
 
-            if let notes = currentStep?.notes,
-               !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(notes)
-                    .font(analogFont(18))
-                    .foregroundStyle(textColor.opacity(0.45))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.75)
-                    .padding(.horizontal, 40)
-                    .padding(.bottom, 14)
-            }
-
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(routineStartClockText)
@@ -290,6 +269,17 @@ struct RoutineTimerView: View {
                 }
 
                 Spacer()
+
+                let stepNotes = currentStep?.notes ?? ""
+                if !stepNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button { showingNotes = true } label: {
+                        Image(systemName: "note.text")
+                            .font(.system(size: 22))
+                            .foregroundStyle(textColor.opacity(0.55))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 14)
+                }
 
                 Text("NEXT: \(nextStepTitle.uppercased())")
                     .font(analogFont(19))
@@ -410,8 +400,6 @@ struct RoutineTimerView: View {
         return isRunning ? "pause.fill" : "play.fill"
     }
 
-    private var canGoPrevious: Bool { currentIndex > 0 && !steps.isEmpty }
-
     private var routineSignature: String {
         steps.map { "\($0.sortOrder)|\($0.title)|\($0.durationSeconds)|\($0.autoNext)|\($0.notes)" }
              .joined(separator: "::")
@@ -487,12 +475,6 @@ struct RoutineTimerView: View {
         } else {
             completeRoutine(playSound: true)
         }
-    }
-
-    private func previousStep() {
-        guard canGoPrevious else { return }
-        currentIndex -= 1
-        startCurrentStepFromBeginning(playSound: false)
     }
 
     private func startCurrentStepFromBeginning(playSound: Bool) {
