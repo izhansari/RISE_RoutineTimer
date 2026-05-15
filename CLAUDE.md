@@ -48,19 +48,11 @@ Replace or augment the left edge of the active timer screen with a vertical bar 
 - If a step runs over time, the indicator stalls (end time extends, indicator stays put until the step is finished).
 - The existing `routineElapsedSeconds` and `adjustedRoutineDurationSeconds` computed properties already have the math needed.
 
-### 3. New step immediately opens editor
-In `RoutineListView.addStep()`, after inserting the new `RoutineStep` into the model context, navigate directly to `StepEditorView` for that step instead of just appending it to the list.
+### 3. ~~New step immediately opens editor~~ ✓ Done
+`RoutineListView` now uses a `NavigationPath`-backed `NavigationStack`. `addStep()` inserts the step, saves, then calls `path.append(step)`. `.navigationDestination(for: RoutineStep.self)` handles routing to `StepEditorView`.
 
-- Use a `@State private var navigateToNewStep: RoutineStep?` + `NavigationLink(value:)` or programmatic `NavigationPath` push.
-- The new step is already saved; the editor just needs to be presented for it.
-
-### 4. Notes shown on demand via sheet during active timer
-Currently notes are always shown (dimmed, bottom of screen). Replace this with:
-
-- A button (e.g. a small note icon) visible during the active timer screen.
-- Tapping it presents the current step's notes as a `.sheet`.
-- If the current step has no notes, the button is hidden or disabled.
-- Remove the always-visible inline notes text from `activeContent`.
+### 4. ~~Notes shown on demand via sheet during active timer~~ ✓ Done
+Inline notes text removed from `activeContent`. A `note.text` icon button now appears in the bottom bar when the current step has notes; tapping it sets `showingNotes = true`, which triggers a `.sheet` attached to `activeRoutineScreen`. Button is hidden when there are no notes.
 
 ### 5. Icons / emojis per step
 Allow each step to have an optional emoji or SF Symbol so the step is identifiable at a glance.
@@ -72,5 +64,5 @@ Allow each step to have an optional emoji or SF Symbol so the step is identifiab
   - The active timer screen title area.
   - `RoutineStepRow` in the edit list.
 
-### 6. Remove Back / Reset / Skip buttons from the Run tab idle screen
-In `RoutineTimerView.idleScreen`, delete the `HStack` containing the Back, Reset, and Skip buttons that sits below the primary Start/Pause button. Keep the primary button only.
+### 6. ~~Remove Back / Reset / Skip buttons from the Run tab idle screen~~ ✓ Done
+Secondary button row and its helpers (`previousStep()`, `canGoPrevious`) deleted from `RoutineTimerView`. Only the primary Start / Pause / Start Over button remains.
