@@ -1,11 +1,3 @@
-//
-//  RoutineTimerView.swift
-//  RISE_RoutineTimer
-//
-//  The runner tab. Timer state is based on Dates, not just tick counts, so it
-//  can catch up after the app is backgrounded and opened again.
-//
-
 import SwiftUI
 import UIKit
 
@@ -13,9 +5,6 @@ private enum FillDirection {
     case bottomToTop
 }
 
-// Same masking pattern as TwoMinRuleTimer: content is drawn twice at the exact
-// same coordinates, and only the filling layer is masked. The fill moves; the
-// text never does.
 private struct InvertingFillView<Content: View>: View {
     let fillColor: Color
     let fillFraction: Double
@@ -28,7 +17,6 @@ private struct InvertingFillView<Content: View>: View {
                 Color.white
                 content(.black)
             }
-
             ZStack {
                 fillColor
                 content(.white)
@@ -40,15 +28,8 @@ private struct InvertingFillView<Content: View>: View {
     private var maskShape: some View {
         GeometryReader { geo in
             Color.black
-                .frame(
-                    width: geo.size.width,
-                    height: geo.size.height * fillFraction
-                )
-                .frame(
-                    width: geo.size.width,
-                    height: geo.size.height,
-                    alignment: .bottom
-                )
+                .frame(width: geo.size.width, height: geo.size.height * fillFraction)
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .bottom)
         }
     }
 }
@@ -83,20 +64,20 @@ struct RoutineTimerView: View {
                 } else if isRunning {
                     activeRoutineScreen
                 } else {
-                    ScrollView {
-                        VStack(spacing: 24) {
-                            timerCard
-                            notesCard
-                            controls
-                            settings
-                        }
-                        .padding()
-                    }
+                    idleScreen
                 }
             }
             .navigationTitle("Morning Routine")
             .toolbar(isRunning ? .hidden : .visible, for: .navigationBar)
             .toolbar(isRunning ? .hidden : .visible, for: .tabBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: { soundsEnabled.toggle() }) {
+                        Image(systemName: soundsEnabled ? "speaker.wave.2" : "speaker.slash")
+                    }
+                    .accessibilityLabel(soundsEnabled ? "Mute sounds" : "Enable sounds")
+                }
+            }
         }
         .onChange(of: scenePhase) { _, newPhase in
             handleScenePhaseChange(newPhase)
@@ -112,412 +93,298 @@ struct RoutineTimerView: View {
         }
     }
 
-    private var activeRoutineScreen: some View {
-        GeometryReader { geometry in
-            let checkDiameter = min(168, geometry.size.width * 0.43)
-            let checkY = fixedCheckButtonY(diameter: checkDiameter, in: geometry)
+    // MARK: - Idle Screen
 
+    private var idleScreen: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(idleStatusLabel)
+                            .font(.system(size: 12, weight: .semibold))
+                            .tracking(2.5)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(TimeFormatting.durationText(from: plannedRoutineDurationSeconds))
+                            .font(analogFont(30))
+                    }
+                    .padding(.vertical, 20)
+
+                    Divider().padding(.bottom, 12)
+
+                    ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
+                        IdleStepRow(
+                            step: step,
+                            index: index,
+                            currentIndex: currentIndex,
+                            isRoutineComplete: isComplete
+                        )
+
+                        if index < steps.count - 1 {
+                            Rectangle()
+                                .fill(Color.secondary.opacity(0.15))
+                                .frame(width: 1.5, height: 20)
+                                .padding(.leading, 14)
+                        }
+                    }
+
+                    Spacer().frame(height: 20)
+                }
+                .padding(.horizontal, 24)
+            }
+
+            VStack(spacing: 0) {
+                Divider()
+
+                VStack(spacing: 10) {
+                    Button(action: toggleRunning) {
+                        HStack(spacing: 10) {
+                            Image(systemName: primaryButtonIcon)
+                                .font(.system(size: 17))
+                            Text(primaryButtonTitle.uppercased())
+                                .font(analogFont(22))
+                                .tracking(2)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 58)
+                        .background(Color.primary)
+                        .foregroundStyle(Color(.systemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .buttonStyle(.plain)
+
+                    HStack(spacing: 0) {
+                        Button(action: previousStep) {
+                            Label("Back", systemImage: "backward.fill")
+                        }
+                        .disabled(!canGoPrevious)
+                        .frame(maxWidth: .infinity)
+
+                        Button(action: resetRoutine) {
+                            Label("Reset", systemImage: "arrow.counterclockwise")
+                        }
+                        .frame(maxWidth: .infinity)
+
+                        Button(action: nextStep) {
+                            Label("Skip", systemImage: "forward.fill")
+                        }
+                        .disabled(isComplete)
+                        .frame(maxWidth: .infinity)
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 14)
+            }
+        }
+    }
+
+    private var idleStatusLabel: String {
+        if isComplete { return "COMPLETE" }
+        let inProgress = pausedRemainingSeconds != nil || pausedRoutineElapsedSeconds != nil || currentIndex > 0
+        return inProgress ? "PAUSED" : "READY"
+    }
+
+    // MARK: - Active Screen
+
+    private var activeRoutineScreen: some View {
+        GeometryReader { geo in
             ZStack {
                 InvertingFillView(
                     fillColor: .black,
                     fillFraction: currentStepFillProgress,
                     direction: .bottomToTop
                 ) { textColor in
-                    activeFixedContent(in: geometry, textColor: textColor)
+                    activeContent(textColor: textColor, geo: geo)
                 }
                 .ignoresSafeArea()
 
+                let d = min(144, geo.size.width * 0.37)
                 Button(action: nextStep) {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 100, weight: .medium))
-                        .foregroundStyle(.black)
-                        .frame(width: checkDiameter, height: checkDiameter)
-                        .background(Circle().fill(.white))
-                        .overlay(
-                            Circle()
-                                .stroke(.black.opacity(0.12), lineWidth: 2)
-                        )
+                        .font(.system(size: d * 0.46, weight: .medium))
+                        .foregroundStyle(Color.black)
+                        .frame(width: d, height: d)
+                        .background(Circle().fill(Color.white))
+                        .overlay(Circle().strokeBorder(Color.black.opacity(0.1), lineWidth: 2))
                 }
                 .buttonStyle(.plain)
-                .position(x: geometry.size.width / 2, y: checkY)
-                .accessibilityLabel("Complete current step")
+                .accessibilityLabel("Complete step")
+                .position(
+                    x: geo.size.width / 2,
+                    y: min(
+                        geo.size.height * 0.64,
+                        geo.size.height - geo.safeAreaInsets.bottom - d / 2 - 52
+                    )
+                )
             }
         }
     }
 
-    private func activeFixedContent(in geometry: GeometryProxy, textColor: Color) -> some View {
-        ZStack(alignment: .topLeading) {
-            activeHeader(color: textColor)
-                .frame(width: max(180, geometry.size.width - 160))
-                .position(
-                    x: geometry.size.width / 2 + 36,
-                    y: headerCenterY(in: geometry)
-                )
-
-            timerText(color: textColor)
-                .frame(width: geometry.size.width)
-                .position(x: geometry.size.width / 2, y: fixedTimerY(in: geometry))
-
-            activeProgressRail(in: geometry, textColor: textColor)
-
-            Text("NEXT: \(nextStepTitle.uppercased())")
-                .font(analogFont(24))
-                .tracking(2)
-                .foregroundStyle(textColor.opacity(0.58))
-                .lineLimit(1)
-                .minimumScaleFactor(0.55)
-                .frame(maxWidth: geometry.size.width * 0.58, alignment: .trailing)
-                .position(
-                    x: geometry.size.width - ((geometry.size.width * 0.58) / 2) - 16,
-                    y: geometry.size.height - max(56, geometry.safeAreaInsets.bottom + 30)
-                )
-        }
-        .frame(width: geometry.size.width, height: geometry.size.height)
-    }
-
-    private func activeHeader(color: Color) -> some View {
-        VStack(spacing: 14) {
-            Text((currentStep?.title ?? "Routine").uppercased())
-                .font(analogFont(40))
-                .multilineTextAlignment(.center)
-                .foregroundStyle(color)
-                .lineLimit(2)
-                .minimumScaleFactor(0.75)
-
-            Text(stepTimeRangeText)
-                .font(analogFont(28))
-                .foregroundStyle(color.opacity(0.7))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-        }
-    }
-
-    private func timerText(color: Color) -> some View {
-        Text(displayTime)
-            .font(digitFont(96))
-            .monospacedDigit()
-            .foregroundStyle(color)
-            .minimumScaleFactor(0.55)
-            .lineLimit(1)
-            .frame(maxWidth: .infinity)
-    }
-
-    private func activeProgressRail(in geometry: GeometryProxy, textColor: Color) -> some View {
-        let topY = max(150, geometry.safeAreaInsets.top + 116)
-        let bottomY = geometry.size.height - max(126, geometry.safeAreaInsets.bottom + 96)
-        let railHeight = max(120, bottomY - topY)
-        let dotY = bottomY - (railHeight * routineProgressValue)
-
-        return ZStack(alignment: .top) {
-            Capsule()
-                .fill(Color(white: 0.86))
-                .frame(width: 50, height: railHeight)
-                .overlay(
+    private func activeContent(textColor: Color, geo: GeometryProxy) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                ForEach(steps.indices, id: \.self) { i in
                     Capsule()
-                        .stroke(Color(white: 0.72), lineWidth: 3)
-                )
+                        .fill(textColor.opacity(
+                            i < currentIndex ? 0.7 : i == currentIndex ? 1.0 : 0.2
+                        ))
+                        .frame(width: i == currentIndex ? 26 : 10, height: 5)
+                }
+            }
+            .animation(.easeInOut(duration: 0.3), value: currentIndex)
+            .padding(.top, geo.safeAreaInsets.top + 16)
+            .padding(.horizontal, 28)
 
-            Capsule()
-                .fill(Color(white: 0.58))
-                .frame(width: 50, height: railHeight * routineProgressValue)
-                .frame(height: railHeight, alignment: .bottom)
+            Spacer().frame(height: geo.size.height * 0.08)
 
-            Circle()
-                .fill(Color(red: 0.17, green: 0.56, blue: 0.68))
-                .frame(width: 28, height: 28)
-                .overlay(
-                    Circle()
-                        .stroke(.white.opacity(0.92), lineWidth: 3)
-                )
-                .offset(y: dotY - topY - 14)
+            VStack(spacing: 10) {
+                Text((currentStep?.title ?? "").uppercased())
+                    .font(analogFont(44))
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(textColor)
+                    .minimumScaleFactor(0.55)
+                    .lineLimit(2)
 
-            Text(routineEndClockText)
-                .font(analogFont(26))
-                .foregroundStyle(textColor)
-                .frame(width: 90, alignment: .leading)
-                .offset(x: -4, y: -44)
+                Text(stepTimeRangeText)
+                    .font(analogFont(22))
+                    .foregroundStyle(textColor.opacity(0.6))
+            }
+            .padding(.horizontal, 28)
 
-            Text(routineStartClockText)
-                .font(analogFont(24))
-                .foregroundStyle(textColor)
-                .frame(width: 90, alignment: .leading)
-                .offset(x: -4, y: railHeight + 10)
-        }
-        .position(x: 68, y: topY + railHeight / 2)
-    }
-
-    private func headerCenterY(in geometry: GeometryProxy) -> CGFloat {
-        max(168, geometry.safeAreaInsets.top + 142)
-    }
-
-    private func fixedTimerY(in geometry: GeometryProxy) -> CGFloat {
-        let checkDiameter = min(168, geometry.size.width * 0.43)
-        let checkY = fixedCheckButtonY(diameter: checkDiameter, in: geometry)
-        return min(geometry.size.height * 0.43, checkY - (checkDiameter / 2) - 92)
-    }
-
-    private func fixedCheckButtonY(diameter: CGFloat, in geometry: GeometryProxy) -> CGFloat {
-        let radius = diameter / 2
-        let preferredY = geometry.size.height * 0.64
-        let bottomLimit = geometry.size.height - geometry.safeAreaInsets.bottom - radius - 66
-        return min(preferredY, bottomLimit)
-    }
-
-    private var timerCard: some View {
-        VStack(spacing: 18) {
-            Text(statusText)
-                .font(analogFont(18))
-                .foregroundStyle(isOvertime ? .orange : .secondary)
-
-            Text(currentStep?.title ?? "Routine")
-                .font(analogFont(40))
-                .multilineTextAlignment(.center)
+            Spacer().frame(height: geo.size.height * 0.05)
 
             Text(displayTime)
-                .font(digitFont(82))
+                .font(digitFont(88))
                 .monospacedDigit()
-                .foregroundStyle(isOvertime ? .orange : .primary)
-                .minimumScaleFactor(0.65)
+                .foregroundStyle(textColor)
+                .minimumScaleFactor(0.35)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 16)
 
-            ProgressView(value: progressValue)
-                .tint(isOvertime ? .orange : .blue)
+            Spacer()
 
-            VStack(spacing: 8) {
-                LabeledContent("Task duration", value: plannedDurationText)
-                LabeledContent("Next task", value: nextStepTitle)
+            if let notes = currentStep?.notes,
+               !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(notes)
+                    .font(analogFont(18))
+                    .foregroundStyle(textColor.opacity(0.45))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.75)
+                    .padding(.horizontal, 40)
+                    .padding(.bottom, 14)
             }
-            .font(.callout)
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
-    }
 
-    @ViewBuilder
-    private var notesCard: some View {
-        if let currentStep, !currentStep.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Label("Notes", systemImage: "note.text")
-                    .font(.headline)
-
-                Text(currentStep.notes)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity)
-            .background(.background, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(.quaternary)
-            )
-        }
-    }
-
-    private var controls: some View {
-        VStack(spacing: 12) {
-            Button(action: toggleRunning) {
-                Label(primaryButtonTitle, systemImage: primaryButtonIcon)
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-
-            HStack {
-                Button(action: previousStep) {
-                    Label("Previous", systemImage: "backward.fill")
-                }
-                .disabled(!canGoPrevious)
-
-                Spacer()
-
-                Button(action: resetRoutine) {
-                    Label("Reset", systemImage: "arrow.counterclockwise")
+            HStack(alignment: .bottom) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(routineStartClockText)
+                        .font(analogFont(17))
+                        .foregroundStyle(textColor.opacity(0.35))
+                    Text(routineEndClockText)
+                        .font(analogFont(21))
+                        .foregroundStyle(textColor.opacity(0.6))
                 }
 
                 Spacer()
 
-                Button(action: nextStep) {
-                    Label("Next", systemImage: "forward.fill")
-                }
-                .disabled(isComplete)
+                Text("NEXT: \(nextStepTitle.uppercased())")
+                    .font(analogFont(19))
+                    .tracking(1.5)
+                    .foregroundStyle(textColor.opacity(0.5))
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.55)
+                    .frame(maxWidth: geo.size.width * 0.5, alignment: .trailing)
             }
-            .buttonStyle(.bordered)
+            .padding(.horizontal, 24)
+            .padding(.bottom, max(geo.safeAreaInsets.bottom + 24, 36))
         }
+        .frame(width: geo.size.width, height: geo.size.height)
     }
 
-    private var settings: some View {
-        Toggle(isOn: $soundsEnabled) {
-            Label("Sounds", systemImage: soundsEnabled ? "speaker.wave.2" : "speaker.slash")
-        }
-        .padding(.horizontal, 4)
-    }
+    // MARK: - Computed Properties
 
     private var currentStep: RoutineStep? {
-        guard steps.indices.contains(currentIndex) else {
-            return nil
-        }
-
+        guard steps.indices.contains(currentIndex) else { return nil }
         return steps[currentIndex]
     }
 
     private var secondsRemaining: Int {
-        guard let currentStep else {
-            return 0
-        }
-
-        if isComplete {
-            return 0
-        }
-
-        if let stepEndDate {
-            return Int(ceil(stepEndDate.timeIntervalSince(now)))
-        }
-
+        guard let currentStep else { return 0 }
+        if isComplete { return 0 }
+        if let stepEndDate { return Int(ceil(stepEndDate.timeIntervalSince(now))) }
         return pausedRemainingSeconds ?? currentStep.durationSeconds
     }
 
-    private var isOvertime: Bool {
-        secondsRemaining < 0
-    }
+    private var isOvertime: Bool { secondsRemaining < 0 }
 
     private var displayTime: String {
-        if isOvertime {
-            return "+\(TimeFormatting.clockTime(from: secondsRemaining))"
-        }
-
+        if isOvertime { return "+\(TimeFormatting.clockTime(from: secondsRemaining))" }
         return TimeFormatting.clockTime(from: secondsRemaining)
-    }
-
-    private var plannedDurationText: String {
-        TimeFormatting.durationText(from: currentStep?.durationSeconds ?? 0)
     }
 
     private var nextStepTitle: String {
         guard steps.indices.contains(currentIndex + 1) else {
             return isComplete ? "Done" : "Routine complete"
         }
-
         return steps[currentIndex + 1].title
-    }
-
-    private var currentClockText: String {
-        TimeFormatting.shortClockTime(from: now)
-    }
-
-    private var stepStartClockText: String {
-        TimeFormatting.shortClockTime(from: displayedStepStartDate)
     }
 
     private var stepTimeRangeText: String {
         let start = TimeFormatting.shortClockTime(from: displayedStepStartDate)
         let end = TimeFormatting.shortClockTime(from: displayedStepEndDate)
-
-        return "\(start) - \(end)"
+        return "\(start) – \(end)"
     }
 
     private var displayedStepStartDate: Date {
-        if let stepStartDate {
-            return stepStartDate
-        }
-
+        if let stepStartDate { return stepStartDate }
         if let stepEndDate, let currentStep {
             return stepEndDate.addingTimeInterval(TimeInterval(-currentStep.durationSeconds))
         }
-
-        guard let currentStep else {
-            return now
-        }
-
+        guard let currentStep else { return now }
         let remaining = pausedRemainingSeconds ?? currentStep.durationSeconds
         return now.addingTimeInterval(TimeInterval(-(currentStep.durationSeconds - remaining)))
     }
 
     private var displayedStepEndDate: Date {
-        if let stepEndDate {
-            return stepEndDate
-        }
-
+        if let stepEndDate { return stepEndDate }
         return displayedStepStartDate.addingTimeInterval(TimeInterval(currentStep?.durationSeconds ?? 0))
     }
 
-    private var statusText: String {
-        if isComplete {
-            return "Complete"
-        }
-
-        if isOvertime {
-            return "Overtime"
-        }
-
-        return isRunning ? "Running" : "Paused"
-    }
-
-    private var progressValue: Double {
-        guard let currentStep else {
-            return 0
-        }
-
-        guard currentStep.durationSeconds > 0 else {
-            return 1
-        }
-
-        let elapsed = currentStep.durationSeconds - max(0, secondsRemaining)
-        return min(1, max(0, Double(elapsed) / Double(currentStep.durationSeconds)))
-    }
-
     private var currentStepFillProgress: Double {
-        guard let currentStep else {
-            return 0
-        }
-
+        guard let currentStep else { return 0 }
         let elapsed = max(0, currentStep.durationSeconds - secondsRemaining)
         return min(1, Double(elapsed) / Double(currentStep.durationSeconds))
-    }
-
-    private var routineProgressValue: Double {
-        let adjustedDuration = max(1, adjustedRoutineDurationSeconds)
-        return min(1, max(0, Double(routineElapsedSeconds) / Double(adjustedDuration)))
     }
 
     private var routineElapsedSeconds: Int {
         if let routineStartDate, isRunning {
             return max(0, Int(now.timeIntervalSince(routineStartDate)))
         }
-
         return max(0, pausedRoutineElapsedSeconds ?? elapsedSecondsBeforeCurrentStep)
     }
 
     private var plannedRoutineDurationSeconds: Int {
-        steps.reduce(0) { total, step in
-            total + step.durationSeconds
-        }
+        steps.reduce(0) { $0 + $1.durationSeconds }
     }
 
     private var adjustedRoutineDurationSeconds: Int {
         max(1, plannedRoutineDurationSeconds + accumulatedRoutineDeltaSeconds + currentOvertimeSeconds)
     }
 
-    private var currentOvertimeSeconds: Int {
-        max(0, -secondsRemaining)
-    }
+    private var currentOvertimeSeconds: Int { max(0, -secondsRemaining) }
 
     private var elapsedSecondsBeforeCurrentStep: Int {
-        guard currentIndex > 0 else {
-            return 0
-        }
-
-        return steps.prefix(currentIndex).reduce(0) { total, step in
-            total + step.durationSeconds
-        }
+        guard currentIndex > 0 else { return 0 }
+        return steps.prefix(currentIndex).reduce(0) { $0 + $1.durationSeconds }
     }
 
     private var displayedRoutineStartDate: Date {
-        if let routineStartDate {
-            return routineStartDate
-        }
-
+        if let routineStartDate { return routineStartDate }
         return now.addingTimeInterval(TimeInterval(-routineElapsedSeconds))
     }
 
@@ -534,32 +401,23 @@ struct RoutineTimerView: View {
     }
 
     private var primaryButtonTitle: String {
-        if isComplete {
-            return "Start Over"
-        }
-
+        if isComplete { return "Start Over" }
         return isRunning ? "Pause" : "Start"
     }
 
     private var primaryButtonIcon: String {
-        if isComplete {
-            return "arrow.counterclockwise"
-        }
-
+        if isComplete { return "arrow.counterclockwise" }
         return isRunning ? "pause.fill" : "play.fill"
     }
 
-    private var canGoPrevious: Bool {
-        currentIndex > 0 && !steps.isEmpty
+    private var canGoPrevious: Bool { currentIndex > 0 && !steps.isEmpty }
+
+    private var routineSignature: String {
+        steps.map { "\($0.sortOrder)|\($0.title)|\($0.durationSeconds)|\($0.autoNext)|\($0.notes)" }
+             .joined(separator: "::")
     }
 
-    // Any edit to the routine should reschedule notifications if the timer is running.
-    private var routineSignature: String {
-        steps.map { step in
-            "\(step.sortOrder)|\(step.title)|\(step.durationSeconds)|\(step.autoNext)|\(step.notes)"
-        }
-        .joined(separator: "::")
-    }
+    // MARK: - Actions
 
     private func toggleRunning() {
         if isComplete {
@@ -573,22 +431,18 @@ struct RoutineTimerView: View {
     }
 
     private func startRoutine() {
-        guard let currentStep else {
-            return
-        }
-
+        guard let currentStep else { return }
         now = Date()
-
-        // If resuming, rebuild the original start date from the saved remaining time.
         let remaining = pausedRemainingSeconds ?? currentStep.durationSeconds
         stepEndDate = now.addingTimeInterval(TimeInterval(remaining))
         stepStartDate = stepEndDate?.addingTimeInterval(TimeInterval(-currentStep.durationSeconds))
-        routineStartDate = now.addingTimeInterval(TimeInterval(-(pausedRoutineElapsedSeconds ?? elapsedSecondsBeforeCurrentStep)))
+        routineStartDate = now.addingTimeInterval(
+            TimeInterval(-(pausedRoutineElapsedSeconds ?? elapsedSecondsBeforeCurrentStep))
+        )
         pausedRemainingSeconds = nil
         pausedRoutineElapsedSeconds = nil
         isComplete = false
         isRunning = true
-
         setScreenAwake(true)
         runCountdownTask()
         requestPermissionAndScheduleNotifications()
@@ -603,7 +457,6 @@ struct RoutineTimerView: View {
         stepEndDate = nil
         routineStartDate = nil
         isRunning = false
-
         setScreenAwake(false)
         RoutineNotificationManager.cancelRoutineNotifications()
     }
@@ -621,19 +474,13 @@ struct RoutineTimerView: View {
         pausedRoutineElapsedSeconds = nil
         accumulatedRoutineDeltaSeconds = 0
         now = Date()
-
         setScreenAwake(false)
         RoutineNotificationManager.cancelRoutineNotifications()
     }
 
     private func nextStep() {
-        guard !steps.isEmpty else {
-            resetRoutine()
-            return
-        }
-
+        guard !steps.isEmpty else { resetRoutine(); return }
         recordCurrentStepTimingDelta()
-
         if steps.indices.contains(currentIndex + 1) {
             currentIndex += 1
             startCurrentStepFromBeginning(playSound: isRunning)
@@ -643,10 +490,7 @@ struct RoutineTimerView: View {
     }
 
     private func previousStep() {
-        guard canGoPrevious else {
-            return
-        }
-
+        guard canGoPrevious else { return }
         currentIndex -= 1
         startCurrentStepFromBeginning(playSound: false)
     }
@@ -654,12 +498,13 @@ struct RoutineTimerView: View {
     private func startCurrentStepFromBeginning(playSound: Bool) {
         now = Date()
         pausedRemainingSeconds = currentStep?.durationSeconds
-
         if isRunning {
             stepStartDate = now
             stepEndDate = now.addingTimeInterval(TimeInterval(currentStep?.durationSeconds ?? 0))
             if routineStartDate == nil {
-                routineStartDate = now.addingTimeInterval(TimeInterval(-(elapsedSecondsBeforeCurrentStep + accumulatedRoutineDeltaSeconds)))
+                routineStartDate = now.addingTimeInterval(
+                    TimeInterval(-(elapsedSecondsBeforeCurrentStep + accumulatedRoutineDeltaSeconds))
+                )
             }
             pausedRemainingSeconds = nil
             pausedRoutineElapsedSeconds = nil
@@ -669,46 +514,32 @@ struct RoutineTimerView: View {
             stepEndDate = nil
             pausedRoutineElapsedSeconds = elapsedSecondsBeforeCurrentStep + accumulatedRoutineDeltaSeconds
         }
-
         isComplete = false
-
-        if playSound {
-            RoutineSoundPlayer.playStepTransition(isEnabled: soundsEnabled)
-        }
+        if playSound { RoutineSoundPlayer.playStepTransition(isEnabled: soundsEnabled) }
     }
 
     private func advanceAutoNextStepsIfNeeded() {
-        guard isRunning, let originalEndDate = stepEndDate, !steps.isEmpty else {
-            return
-        }
-
+        guard isRunning, let originalEndDate = stepEndDate, !steps.isEmpty else { return }
         var index = currentIndex
-        var startDate = stepStartDate ?? originalEndDate.addingTimeInterval(TimeInterval(-(currentStep?.durationSeconds ?? 0)))
+        var startDate = stepStartDate ?? originalEndDate.addingTimeInterval(
+            TimeInterval(-(currentStep?.durationSeconds ?? 0))
+        )
         var endDate = originalEndDate
         var didAdvance = false
 
         while steps.indices.contains(index) {
             let step = steps[index]
-
-            guard now >= endDate else {
-                break
-            }
-
-            guard step.autoNext else {
-                break
-            }
-
+            guard now >= endDate else { break }
+            guard step.autoNext else { break }
             let nextIndex = index + 1
-
             guard steps.indices.contains(nextIndex) else {
                 completeRoutine(playSound: true)
                 return
             }
-
-            let nextStep = steps[nextIndex]
+            let next = steps[nextIndex]
             index = nextIndex
             startDate = endDate
-            endDate = startDate.addingTimeInterval(TimeInterval(nextStep.durationSeconds))
+            endDate = startDate.addingTimeInterval(TimeInterval(next.durationSeconds))
             didAdvance = true
         }
 
@@ -732,13 +563,9 @@ struct RoutineTimerView: View {
         pausedRemainingSeconds = 0
         pausedRoutineElapsedSeconds = adjustedRoutineDurationSeconds
         routineStartDate = nil
-
         setScreenAwake(false)
         RoutineNotificationManager.cancelRoutineNotifications()
-
-        if playSound {
-            RoutineSoundPlayer.playCompletion(isEnabled: soundsEnabled)
-        }
+        if playSound { RoutineSoundPlayer.playCompletion(isEnabled: soundsEnabled) }
     }
 
     private func runCountdownTask() {
@@ -747,43 +574,29 @@ struct RoutineTimerView: View {
             while !Task.isCancelled {
                 now = Date()
                 advanceAutoNextStepsIfNeeded()
-
-                guard isRunning else {
-                    return
-                }
-
+                guard isRunning else { return }
                 try? await Task.sleep(for: .seconds(1))
             }
         }
     }
 
     private func refreshFromBackground() {
-        guard isRunning else {
-            return
-        }
-
+        guard isRunning else { return }
         now = Date()
         advanceAutoNextStepsIfNeeded()
         runCountdownTask()
     }
 
     private func recordCurrentStepTimingDelta() {
-        guard let currentStep else {
-            return
-        }
-
-        let elapsedSeconds = max(0, currentStep.durationSeconds - secondsRemaining)
-        accumulatedRoutineDeltaSeconds += elapsedSeconds - currentStep.durationSeconds
+        guard let currentStep else { return }
+        let elapsed = max(0, currentStep.durationSeconds - secondsRemaining)
+        accumulatedRoutineDeltaSeconds += elapsed - currentStep.durationSeconds
     }
 
     private func requestPermissionAndScheduleNotifications() {
-        guard isRunning, let stepStartDate else {
-            return
-        }
-
+        guard isRunning, let stepStartDate else { return }
         Task {
             await RoutineNotificationManager.requestPermissionIfNeeded()
-
             if isRunning {
                 RoutineNotificationManager.scheduleNotifications(
                     steps: steps,
@@ -807,22 +620,86 @@ struct RoutineTimerView: View {
     }
 
     private func handleRoutineChanged() {
-        guard !steps.isEmpty else {
-            resetRoutine()
-            return
-        }
-
+        guard !steps.isEmpty else { resetRoutine(); return }
         if currentIndex >= steps.count {
             currentIndex = max(0, steps.count - 1)
             startCurrentStepFromBeginning(playSound: false)
         }
-
-        if isRunning {
-            requestPermissionAndScheduleNotifications()
-        }
+        if isRunning { requestPermissionAndScheduleNotifications() }
     }
 
     private func setScreenAwake(_ shouldStayAwake: Bool) {
         UIApplication.shared.isIdleTimerDisabled = shouldStayAwake
+    }
+}
+
+// MARK: - Idle Step Row
+
+private struct IdleStepRow: View {
+    let step: RoutineStep
+    let index: Int
+    let currentIndex: Int
+    let isRoutineComplete: Bool
+
+    private var isDone: Bool { isRoutineComplete || index < currentIndex }
+    private var isCurrent: Bool { !isRoutineComplete && index == currentIndex }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(isDone || isCurrent ? Color.primary : Color.clear)
+                Circle()
+                    .strokeBorder(
+                        Color.primary.opacity(isDone || isCurrent ? 0 : 0.3),
+                        lineWidth: 1.5
+                    )
+
+                if isDone {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Color(.systemBackground))
+                } else {
+                    Text("\(index + 1)")
+                        .font(.system(size: 13, weight: isCurrent ? .semibold : .regular))
+                        .foregroundStyle(isCurrent ? Color(.systemBackground) : .secondary)
+                }
+            }
+            .frame(width: 30, height: 30)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(step.title)
+                    .font(analogFont(isCurrent ? 26 : 22))
+                    .foregroundStyle(isDone ? .secondary : .primary)
+
+                HStack(spacing: 10) {
+                    Text(TimeFormatting.durationText(from: step.durationSeconds))
+                        .font(analogFont(16))
+                        .foregroundStyle(.secondary)
+
+                    if !step.autoNext {
+                        Text("MANUAL")
+                            .font(.system(size: 10, weight: .semibold))
+                            .tracking(0.8)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.1), in: Capsule())
+                    }
+                }
+
+                if isCurrent, !step.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(step.notes)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
+                        .lineLimit(3)
+                }
+            }
+
+            Spacer()
+        }
+        .padding(.vertical, 10)
+        .opacity(isDone ? 0.5 : 1)
     }
 }

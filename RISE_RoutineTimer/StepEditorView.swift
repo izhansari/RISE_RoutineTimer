@@ -1,10 +1,3 @@
-//
-//  StepEditorView.swift
-//  RISE_RoutineTimer
-//
-//  The detail form for editing one saved routine step.
-//
-
 import SwiftData
 import SwiftUI
 
@@ -15,27 +8,35 @@ struct StepEditorView: View {
         Form {
             Section("Task") {
                 TextField("Title", text: $step.title)
-
                 Toggle("Auto-next", isOn: $step.autoNext)
             }
 
             Section("Duration") {
-                Stepper(value: minutesBinding, in: 0...180) {
-                    LabeledContent("Minutes", value: "\(step.durationSeconds / 60)")
-                }
+                HStack(spacing: 0) {
+                    Picker("Minutes", selection: minutesBinding) {
+                        ForEach(0..<180) { m in
+                            Text("\(m) min").tag(m)
+                        }
+                    }
+                    .pickerStyle(.wheel)
+                    .frame(maxWidth: .infinity)
+                    .clipped()
 
-                Stepper(value: secondsBinding, in: 0...59) {
-                    LabeledContent("Seconds", value: "\(step.durationSeconds % 60)")
+                    Picker("Seconds", selection: secondsBinding) {
+                        ForEach(0..<60) { s in
+                            Text(String(format: "%02d sec", s)).tag(s)
+                        }
+                    }
+                    .pickerStyle(.wheel)
+                    .frame(maxWidth: .infinity)
+                    .clipped()
                 }
-
-                Text(TimeFormatting.durationText(from: step.durationSeconds))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .frame(height: 150)
             }
 
             Section("Notes") {
                 TextEditor(text: $step.notes)
-                    .frame(minHeight: 140)
+                    .frame(minHeight: 120)
             }
         }
         .navigationTitle(step.title.isEmpty ? "Step" : step.title)

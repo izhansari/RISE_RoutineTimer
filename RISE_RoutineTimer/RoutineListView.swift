@@ -1,10 +1,3 @@
-//
-//  RoutineListView.swift
-//  RISE_RoutineTimer
-//
-//  The editor tab: add, delete, reorder, and open details for each step.
-//
-
 import SwiftData
 import SwiftUI
 
@@ -27,7 +20,10 @@ struct RoutineListView: View {
                     .onDelete(perform: deleteSteps)
                     .onMove(perform: moveSteps)
                 } footer: {
-                    Text("Tip: drag steps while editing to change the order of your routine.")
+                    let total = steps.reduce(0) { $0 + $1.durationSeconds }
+                    if total > 0 {
+                        Text("Total: \(TimeFormatting.durationText(from: total))")
+                    }
                 }
             }
             .navigationTitle("Routine")
@@ -35,7 +31,6 @@ struct RoutineListView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     EditButton()
                 }
-
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: addStep) {
                         Label("Add Step", systemImage: "plus")
@@ -54,7 +49,6 @@ struct RoutineListView: View {
             notes: "",
             sortOrder: nextSortOrder
         )
-
         withAnimation {
             modelContext.insert(step)
             saveChanges()
@@ -63,26 +57,19 @@ struct RoutineListView: View {
 
     private func deleteSteps(at offsets: IndexSet) {
         let stepsToDelete = offsets.map { steps[$0] }
-
         withAnimation {
-            for step in stepsToDelete {
-                modelContext.delete(step)
-            }
-
-            let remainingSteps = steps.filter { step in
-                !stepsToDelete.contains { $0 === step }
-            }
-            renumberSortOrder(for: remainingSteps)
+            for step in stepsToDelete { modelContext.delete(step) }
+            let remaining = steps.filter { step in !stepsToDelete.contains { $0 === step } }
+            renumberSortOrder(for: remaining)
             saveChanges()
         }
     }
 
     private func moveSteps(from source: IndexSet, to destination: Int) {
-        var reorderedSteps = steps
-        reorderedSteps.move(fromOffsets: source, toOffset: destination)
-
+        var reordered = steps
+        reordered.move(fromOffsets: source, toOffset: destination)
         withAnimation {
-            renumberSortOrder(for: reorderedSteps)
+            renumberSortOrder(for: reordered)
             saveChanges()
         }
     }
@@ -106,17 +93,20 @@ private struct RoutineStepRow: View {
     let step: RoutineStep
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
             Text(step.title)
-                .font(.headline)
+                .font(analogFont(22))
 
-            HStack(spacing: 12) {
+            HStack(spacing: 14) {
                 Label(TimeFormatting.durationText(from: step.durationSeconds), systemImage: "clock")
-                Label(step.autoNext ? "Auto-next" : "Manual next", systemImage: step.autoNext ? "arrow.right.circle" : "hand.tap")
+
+                if !step.autoNext {
+                    Label("Manual", systemImage: "hand.tap")
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
     }
 }
