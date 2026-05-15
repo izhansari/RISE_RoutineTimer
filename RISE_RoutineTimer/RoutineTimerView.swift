@@ -51,6 +51,7 @@ struct RoutineTimerView: View {
     @State private var accumulatedRoutineDeltaSeconds = 0
     @State private var timerTask: Task<Void, Never>?
     @State private var now = Date()
+    @State private var showingNotes = false
 
     var body: some View {
         NavigationStack {
@@ -197,6 +198,17 @@ struct RoutineTimerView: View {
                 )
             }
         }
+        .sheet(isPresented: $showingNotes) {
+            let notes = currentStep?.notes ?? ""
+            ScrollView {
+                Text(notes)
+                    .font(analogFont(22))
+                    .multilineTextAlignment(.center)
+                    .padding(32)
+            }
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+        }
     }
 
     private func activeContent(textColor: Color, geo: GeometryProxy) -> some View {
@@ -243,18 +255,6 @@ struct RoutineTimerView: View {
 
             Spacer()
 
-            if let notes = currentStep?.notes,
-               !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(notes)
-                    .font(analogFont(18))
-                    .foregroundStyle(textColor.opacity(0.45))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.75)
-                    .padding(.horizontal, 40)
-                    .padding(.bottom, 14)
-            }
-
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(routineStartClockText)
@@ -266,6 +266,17 @@ struct RoutineTimerView: View {
                 }
 
                 Spacer()
+
+                let stepNotes = currentStep?.notes ?? ""
+                if !stepNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button { showingNotes = true } label: {
+                        Image(systemName: "note.text")
+                            .font(.system(size: 22))
+                            .foregroundStyle(textColor.opacity(0.55))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 14)
+                }
 
                 Text("NEXT: \(nextStepTitle.uppercased())")
                     .font(analogFont(19))
