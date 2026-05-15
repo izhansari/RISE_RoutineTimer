@@ -8,6 +8,8 @@ struct StepEditorView: View {
         Form {
             Section("Task") {
                 TextField("Title", text: $step.title)
+                    .textInputAutocapitalization(.words)
+                    .submitLabel(.done)
                 Toggle("Auto-next", isOn: $step.autoNext)
             }
 

@@ -179,7 +179,10 @@ struct RoutineTimerView: View {
                 .ignoresSafeArea()
 
                 let d = min(144, geo.size.width * 0.37)
-                Button(action: nextStep) {
+                Button {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    nextStep()
+                } label: {
                     Image(systemName: "checkmark")
                         .font(.system(size: d * 0.46, weight: .medium))
                         .foregroundStyle(Color.black)
