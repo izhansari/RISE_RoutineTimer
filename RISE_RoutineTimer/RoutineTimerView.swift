@@ -136,45 +136,21 @@ struct RoutineTimerView: View {
             VStack(spacing: 0) {
                 Divider()
 
-                VStack(spacing: 10) {
-                    Button(action: toggleRunning) {
-                        HStack(spacing: 10) {
-                            Image(systemName: primaryButtonIcon)
-                                .font(.system(size: 17))
-                            Text(primaryButtonTitle.uppercased())
-                                .font(analogFont(22))
-                                .tracking(2)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 58)
-                        .background(Color.primary)
-                        .foregroundStyle(Color(.systemBackground))
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                Button(action: toggleRunning) {
+                    HStack(spacing: 10) {
+                        Image(systemName: primaryButtonIcon)
+                            .font(.system(size: 17))
+                        Text(primaryButtonTitle.uppercased())
+                            .font(analogFont(22))
+                            .tracking(2)
                     }
-                    .buttonStyle(.plain)
-
-                    HStack(spacing: 0) {
-                        Button(action: previousStep) {
-                            Label("Back", systemImage: "backward.fill")
-                        }
-                        .disabled(!canGoPrevious)
-                        .frame(maxWidth: .infinity)
-
-                        Button(action: resetRoutine) {
-                            Label("Reset", systemImage: "arrow.counterclockwise")
-                        }
-                        .frame(maxWidth: .infinity)
-
-                        Button(action: nextStep) {
-                            Label("Skip", systemImage: "forward.fill")
-                        }
-                        .disabled(isComplete)
-                        .frame(maxWidth: .infinity)
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 58)
+                    .background(Color.primary)
+                    .foregroundStyle(Color(.systemBackground))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
+                .buttonStyle(.plain)
                 .padding(.horizontal, 24)
                 .padding(.vertical, 14)
             }
@@ -410,8 +386,6 @@ struct RoutineTimerView: View {
         return isRunning ? "pause.fill" : "play.fill"
     }
 
-    private var canGoPrevious: Bool { currentIndex > 0 && !steps.isEmpty }
-
     private var routineSignature: String {
         steps.map { "\($0.sortOrder)|\($0.title)|\($0.durationSeconds)|\($0.autoNext)|\($0.notes)" }
              .joined(separator: "::")
@@ -487,12 +461,6 @@ struct RoutineTimerView: View {
         } else {
             completeRoutine(playSound: true)
         }
-    }
-
-    private func previousStep() {
-        guard canGoPrevious else { return }
-        currentIndex -= 1
-        startCurrentStepFromBeginning(playSound: false)
     }
 
     private func startCurrentStepFromBeginning(playSound: Bool) {
