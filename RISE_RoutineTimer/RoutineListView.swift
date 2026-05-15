@@ -3,17 +3,16 @@ import SwiftUI
 
 struct RoutineListView: View {
     @Environment(\.modelContext) private var modelContext
+    @State private var path = NavigationPath()
 
     let steps: [RoutineStep]
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 Section {
                     ForEach(steps) { step in
-                        NavigationLink {
-                            StepEditorView(step: step)
-                        } label: {
+                        NavigationLink(value: step) {
                             RoutineStepRow(step: step)
                         }
                     }
@@ -27,6 +26,9 @@ struct RoutineListView: View {
                 }
             }
             .navigationTitle("Routine")
+            .navigationDestination(for: RoutineStep.self) { step in
+                StepEditorView(step: step)
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     EditButton()
@@ -49,10 +51,9 @@ struct RoutineListView: View {
             notes: "",
             sortOrder: nextSortOrder
         )
-        withAnimation {
-            modelContext.insert(step)
-            saveChanges()
-        }
+        modelContext.insert(step)
+        saveChanges()
+        path.append(step)
     }
 
     private func deleteSteps(at offsets: IndexSet) {
