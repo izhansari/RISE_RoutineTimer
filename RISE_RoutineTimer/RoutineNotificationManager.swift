@@ -2,112 +2,70 @@
 //  RoutineNotificationManager.swift
 //  RISE_RoutineTimer
 //
-//  A small wrapper around local notifications for routine step alerts.
+//  Local notifications for when the app is in the background. The engine
+//  decides *what* to schedule (see `RoutineEngine.plannedAlerts`); this file
+//  only turns that plan into requests.
 //
 
 import Foundation
 import UserNotifications
 
-@MainActor
 enum RoutineNotificationManager {
-    private static let notificationPrefix = "routine-step-"
-    private static let completionIdentifier = "routine-complete"
-
     static func requestPermissionIfNeeded() async {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
-
-        guard settings.authorizationStatus == .notDetermined else {
-            return
-        }
+        guard settings.authorizationStatus == .notDetermined else { return }
 
         do {
-            _ = try await center.requestAuthorization(options: [.alert, .sound, .badge])
+            _ = try await center.requestAuthorization(options: [.alert, .sound])
         } catch {
-            // The app can still run without notifications, so we avoid showing
-            // an error UI for this first version.
             print("Notification permission request failed: \(error)")
         }
     }
 
-    static func cancelRoutineNotifications() {
-        let identifiers = (0..<100).map { "\(notificationPrefix)\($0)" } + [completionIdentifier]
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: identifiers)
+    static func cancelAll() {
+        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
     }
 
-    static func scheduleNotifications(
-        steps: [RoutineStep],
-        currentIndex: Int,
-        stepStartDate: Date,
-        now: Date = Date()
-    ) {
-        cancelRoutineNotifications()
+    static func clearDelivered() {
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+    }
 
-        guard steps.indices.contains(currentIndex) else {
-            return
-        }
+    static func schedule(_ alerts: [PlannedAlert], steps: [RunStep], now: Date = Date()) {
+        let center = UNUserNotificationCenter.current()
+        center.removeAllPendingNotificationRequests()
 
-        var scheduledEndDate = stepStartDate.addingTimeInterval(TimeInterval(steps[currentIndex].durationSeconds))
+        for alert in alerts {
+            let interval = alert.fireDate.timeIntervalSince(now)
+            guard interval > 1, steps.indices.contains(alert.stepIndex) else { continue }
 
-        for index in currentIndex..<steps.count {
-            let step = steps[index]
-            let interval = scheduledEndDate.timeIntervalSince(now)
+            let step = steps[alert.stepIndex]
+            let content = UNMutableNotificationContent()
+            content.sound = .default
+            let identifier: String
 
-            if interval > 1 {
-                addStepNotification(
-                    identifier: "\(notificationPrefix)\(index)",
-                    title: "\(step.title) is done",
-                    body: nextStepBody(after: index, in: steps),
-                    interval: interval
-                )
-
-                if index == steps.count - 1 {
-                    addStepNotification(
-                        identifier: completionIdentifier,
-                        title: "Routine complete",
-                        body: "Nice work. Your morning routine is finished.",
-                        interval: interval
-                    )
+            switch alert.kind {
+            case .stepEnd:
+                identifier = "rise-step-\(alert.stepIndex)"
+                content.title = "\(step.title) is done"
+                if steps.indices.contains(alert.stepIndex + 1) {
+                    content.body = "Next: \(steps[alert.stepIndex + 1].title)"
+                } else {
+                    content.body = "That was the last step."
                 }
+            case .overtime(let minutes):
+                identifier = "rise-over-\(alert.stepIndex)-\(minutes)"
+                content.title = "\(step.title) is \(minutes) min over"
+                content.body = "Tap the checkmark when you're done."
+            case .completion:
+                identifier = "rise-complete"
+                content.title = "Routine complete"
+                content.body = "Nice work. Your morning routine is finished."
             }
 
-            // Future timing is only predictable while each previous step auto-advances.
-            // A manual step can run overtime, so we reschedule after the user taps Next.
-            guard step.autoNext else {
-                break
-            }
-
-            if steps.indices.contains(index + 1) {
-                scheduledEndDate = scheduledEndDate.addingTimeInterval(TimeInterval(steps[index + 1].durationSeconds))
-            }
-        }
-    }
-
-    private static func nextStepBody(after index: Int, in steps: [RoutineStep]) -> String {
-        guard steps.indices.contains(index + 1) else {
-            return "That was the final step."
-        }
-
-        return "Next: \(steps[index + 1].title)"
-    }
-
-    private static func addStepNotification(
-        identifier: String,
-        title: String,
-        body: String,
-        interval: TimeInterval
-    ) {
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
-        content.sound = .default
-
-        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, interval), repeats: false)
-        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
-
-        UNUserNotificationCenter.current().add(request) { error in
-            if let error {
-                print("Could not schedule notification \(identifier): \(error)")
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
+            center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)) { error in
+                if let error { print("Could not schedule \(identifier): \(error)") }
             }
         }
     }

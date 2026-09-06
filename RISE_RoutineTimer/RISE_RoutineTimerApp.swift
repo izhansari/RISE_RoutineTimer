@@ -11,8 +11,18 @@ import CoreText
 
 @main
 struct RISE_RoutineTimerApp: App {
+    @Environment(\.scenePhase) private var scenePhase
+
+    // The engine restores any in-progress run from disk, and the coordinator
+    // is attached before the first tick so alerts are never missed.
+    @State private var engine: RoutineEngine
+    private let alertCoordinator: RoutineAlertCoordinator
+
     init() {
         registerBundledFonts()
+        let engine = RoutineEngine()
+        _engine = State(initialValue: engine)
+        alertCoordinator = RoutineAlertCoordinator(engine: engine)
     }
 
     var sharedModelContainer: ModelContainer = {
@@ -31,8 +41,14 @@ struct RISE_RoutineTimerApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(engine)
         }
         .modelContainer(sharedModelContainer)
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                alertCoordinator.applicationDidBecomeActive()
+            }
+        }
     }
 }
 

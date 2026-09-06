@@ -98,14 +98,19 @@ private struct RoutineStepRow: View {
             Text(step.title)
                 .font(analogFont(22))
 
-            HStack(spacing: 14) {
-                Label(TimeFormatting.durationText(from: step.durationSeconds), systemImage: "clock")
+            HStack(spacing: 10) {
+                Text(TimeFormatting.durationText(from: step.durationSeconds))
+                    .font(analogFont(16))
 
                 if !step.autoNext {
-                    Label("Manual", systemImage: "hand.tap")
+                    Text("MANUAL")
+                        .font(.system(size: 10, weight: .semibold))
+                        .tracking(0.8)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Color.secondary.opacity(0.1), in: Capsule())
                 }
             }
-            .font(.caption)
             .foregroundStyle(.secondary)
         }
         .padding(.vertical, 6)

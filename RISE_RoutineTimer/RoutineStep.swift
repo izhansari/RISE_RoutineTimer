@@ -10,6 +10,9 @@ import SwiftData
 
 @Model
 final class RoutineStep {
+    // Stable identity that survives renames, so history can match a step over time.
+    var stepID: UUID = UUID()
+
     // The task name users see in the editor and timer.
     var title: String
 
@@ -27,12 +30,14 @@ final class RoutineStep {
     var sortOrder: Int
 
     init(
+        stepID: UUID = UUID(),
         title: String,
         durationSeconds: Int,
         autoNext: Bool = true,
         notes: String = "",
         sortOrder: Int
     ) {
+        self.stepID = stepID
         self.title = title
         self.durationSeconds = max(1, durationSeconds)
         self.autoNext = autoNext
@@ -78,4 +83,9 @@ struct RoutineStepSeed {
     let durationSeconds: Int
     let autoNext: Bool
     let notes: String
+}
+
+extension RoutineStep {
+    /// Anything shorter than this is not a usable timer step.
+    static let minimumDurationSeconds = 5
 }

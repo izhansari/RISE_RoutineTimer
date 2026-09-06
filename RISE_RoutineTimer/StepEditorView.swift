@@ -51,7 +51,7 @@ struct StepEditorView: View {
             step.durationSeconds / 60
         } set: { newMinutes in
             let seconds = step.durationSeconds % 60
-            step.durationSeconds = max(1, newMinutes * 60 + seconds)
+            step.durationSeconds = max(RoutineStep.minimumDurationSeconds, newMinutes * 60 + seconds)
         }
     }
 
@@ -60,7 +60,7 @@ struct StepEditorView: View {
             step.durationSeconds % 60
         } set: { newSeconds in
             let minutes = step.durationSeconds / 60
-            step.durationSeconds = max(1, minutes * 60 + newSeconds)
+            step.durationSeconds = max(RoutineStep.minimumDurationSeconds, minutes * 60 + newSeconds)
         }
     }
 }

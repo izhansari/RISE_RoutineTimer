@@ -1,100 +1,98 @@
+//
+//  RoutineTimerView.swift
+//  RISE_RoutineTimer
+//
+//  The "Run" tab. Idle screen (ready / paused / complete) and the active
+//  timer screen. All timing comes from `RoutineEngine`; this file only draws.
+//
+
 import SwiftUI
 import UIKit
 
-private enum FillDirection {
-    case bottomToTop
-}
-
+/// White page that fills black from the bottom as the step progresses.
+/// Content is drawn once in white with a difference blend, so it reads black
+/// on the white part and white on the black part without duplicating views.
 private struct InvertingFillView<Content: View>: View {
-    let fillColor: Color
     let fillFraction: Double
-    let direction: FillDirection
-    @ViewBuilder let content: (Color) -> Content
+    @ViewBuilder let content: () -> Content
 
     var body: some View {
         ZStack {
-            ZStack {
-                Color.white
-                content(.black)
+            Color.white
+            GeometryReader { geo in
+                Color.black
+                    .frame(height: geo.size.height * fillFraction)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
             }
-            ZStack {
-                fillColor
-                content(.white)
-            }
-            .mask(maskShape)
-        }
-    }
-
-    private var maskShape: some View {
-        GeometryReader { geo in
-            Color.black
-                .frame(width: geo.size.width, height: geo.size.height * fillFraction)
-                .frame(width: geo.size.width, height: geo.size.height, alignment: .bottom)
+            content()
+                .blendMode(.difference)
         }
     }
 }
 
 struct RoutineTimerView: View {
+    @Environment(RoutineEngine.self) private var engine
     @Environment(\.scenePhase) private var scenePhase
-    @AppStorage("routineSoundsEnabled") private var soundsEnabled = true
+    @AppStorage(RoutineAlertCoordinator.soundsKey) private var soundsEnabled = true
+    @AppStorage(RoutineAlertCoordinator.voiceKey) private var voiceEnabled = true
 
     let steps: [RoutineStep]
 
-    @State private var currentIndex = 0
-    @State private var isRunning = false
-    @State private var isComplete = false
-    @State private var stepStartDate: Date?
-    @State private var stepEndDate: Date?
-    @State private var pausedRemainingSeconds: Int?
-    @State private var routineStartDate: Date?
-    @State private var pausedRoutineElapsedSeconds: Int?
-    @State private var accumulatedRoutineDeltaSeconds = 0
-    @State private var timerTask: Task<Void, Never>?
-    @State private var now = Date()
     @State private var showingNotes = false
+    @State private var confirmingEnd = false
 
     var body: some View {
         NavigationStack {
             Group {
-                if steps.isEmpty {
+                if steps.isEmpty && engine.run == nil {
                     ContentUnavailableView(
                         "No Routine Steps",
                         systemImage: "list.bullet",
-                        description: Text("Add a step in the Edit tab to start your routine.")
+                        description: Text("Add a step in the Routine tab to start.")
                     )
-                } else if isRunning {
+                } else if engine.isRunning {
                     activeRoutineScreen
                 } else {
                     idleScreen
                 }
             }
             .navigationTitle("Morning Routine")
-            .toolbar(isRunning ? .hidden : .visible, for: .navigationBar)
-            .toolbar(isRunning ? .hidden : .visible, for: .tabBar)
+            .toolbar(engine.isRunning ? .hidden : .visible, for: .navigationBar)
+            .toolbar(engine.isRunning ? .hidden : .visible, for: .tabBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: { soundsEnabled.toggle() }) {
-                        Image(systemName: soundsEnabled ? "speaker.wave.2" : "speaker.slash")
-                    }
-                    .accessibilityLabel(soundsEnabled ? "Mute sounds" : "Enable sounds")
+                    alertsMenu
                 }
             }
         }
+        .onChange(of: engine.isRunning, initial: true) { _, running in
+            setScreenAwake(running)
+        }
         .onChange(of: scenePhase) { _, newPhase in
-            handleScenePhaseChange(newPhase)
-        }
-        .onChange(of: routineSignature) { _, _ in
-            handleRoutineChanged()
-        }
-        .onAppear {
-            setScreenAwake(isRunning)
+            setScreenAwake(newPhase == .active && engine.isRunning)
         }
         .onDisappear {
             setScreenAwake(false)
         }
     }
 
+    private var alertsMenu: some View {
+        Menu {
+            Toggle(isOn: $soundsEnabled) { Label("Chimes", systemImage: "bell") }
+            Toggle(isOn: $voiceEnabled) { Label("Voice", systemImage: "waveform") }
+        } label: {
+            Image(systemName: soundsEnabled || voiceEnabled ? "speaker.wave.2" : "speaker.slash")
+        }
+        .accessibilityLabel("Alert settings")
+    }
+
     // MARK: - Idle Screen
+
+    /// While a run exists, the list mirrors the run's frozen steps so edits
+    /// made mid-routine don't shuffle the checkmarks.
+    private var displayedSteps: [RunStep] {
+        engine.run == nil ? steps.map(RunStep.init) : engine.steps
+    }
 
     private var idleScreen: some View {
         VStack(spacing: 0) {
@@ -106,22 +104,32 @@ struct RoutineTimerView: View {
                             .tracking(2.5)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text(TimeFormatting.durationText(from: plannedRoutineDurationSeconds))
+                        Text(idleHeadlineTime)
                             .font(analogFont(30))
                     }
-                    .padding(.vertical, 20)
+                    .padding(.top, 20)
+                    .padding(.bottom, idleSummaryLine == nil ? 20 : 6)
+
+                    if let idleSummaryLine {
+                        Text(idleSummaryLine)
+                            .font(analogFont(16))
+                            .foregroundStyle(.secondary)
+                            .padding(.bottom, 16)
+                    }
 
                     Divider().padding(.bottom, 12)
 
-                    ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
+                    let rows = displayedSteps
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, step in
                         IdleStepRow(
                             step: step,
                             index: index,
-                            currentIndex: currentIndex,
-                            isRoutineComplete: isComplete
+                            currentIndex: engine.currentIndex,
+                            isRoutineComplete: engine.isComplete,
+                            isRoutineActive: engine.run != nil
                         )
 
-                        if index < steps.count - 1 {
+                        if index < rows.count - 1 {
                             Rectangle()
                                 .fill(Color.secondary.opacity(0.15))
                                 .frame(width: 1.5, height: 20)
@@ -134,10 +142,10 @@ struct RoutineTimerView: View {
                 .padding(.horizontal, 24)
             }
 
-            VStack(spacing: 0) {
+            VStack(spacing: 10) {
                 Divider()
 
-                Button(action: toggleRunning) {
+                Button(action: primaryAction) {
                     HStack(spacing: 10) {
                         Image(systemName: primaryButtonIcon)
                             .font(.system(size: 17))
@@ -153,58 +161,129 @@ struct RoutineTimerView: View {
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal, 24)
-                .padding(.vertical, 14)
+                .padding(.top, 4)
+
+                if engine.isPaused {
+                    Button("END ROUTINE", role: .destructive) { confirmingEnd = true }
+                        .font(.system(size: 12, weight: .semibold))
+                        .tracking(2)
+                        .foregroundStyle(.secondary)
+                        .padding(.bottom, 4)
+                }
             }
+            .padding(.bottom, 10)
+        }
+        .confirmationDialog("End this routine?", isPresented: $confirmingEnd, titleVisibility: .visible) {
+            Button("End Routine", role: .destructive) { engine.abandon() }
+            Button("Keep Going", role: .cancel) {}
+        } message: {
+            Text("You'll start from the first step next time.")
         }
     }
 
     private var idleStatusLabel: String {
-        if isComplete { return "COMPLETE" }
-        let inProgress = pausedRemainingSeconds != nil || pausedRoutineElapsedSeconds != nil || currentIndex > 0
-        return inProgress ? "PAUSED" : "READY"
+        if engine.isComplete { return "COMPLETE" }
+        if engine.isPaused { return "PAUSED" }
+        return "READY"
+    }
+
+    private var idleHeadlineTime: String {
+        if engine.isComplete {
+            return TimeFormatting.clockTime(from: engine.activeElapsedSeconds)
+        }
+        let planned = engine.run == nil
+            ? steps.reduce(0) { $0 + $1.durationSeconds }
+            : engine.plannedTotalSeconds
+        return TimeFormatting.durationText(from: planned)
+    }
+
+    private var idleSummaryLine: String? {
+        guard let start = engine.routineStartDate else { return nil }
+        let started = "Started \(TimeFormatting.shortClockTime(from: start))"
+        if engine.isComplete {
+            let delta = TimeFormatting.scheduleDeltaText(from: engine.scheduleDeltaSeconds)
+            return "\(started) · \(delta.lowercased())"
+        }
+        if engine.isPaused {
+            return "\(started) · step \(engine.currentIndex + 1) of \(engine.steps.count)"
+        }
+        return nil
+    }
+
+    private var primaryButtonTitle: String {
+        if engine.isComplete { return "Start Over" }
+        if engine.isPaused { return "Resume" }
+        return "Start"
+    }
+
+    private var primaryButtonIcon: String {
+        if engine.isComplete { return "arrow.counterclockwise" }
+        return "play.fill"
+    }
+
+    private func primaryAction() {
+        if engine.isPaused {
+            engine.resume()
+        } else {
+            if engine.isComplete { engine.reset() }
+            engine.start(steps: steps.map(RunStep.init))
+        }
     }
 
     // MARK: - Active Screen
 
     private var activeRoutineScreen: some View {
         GeometryReader { geo in
+            let checkDiameter = min(144, geo.size.width * 0.37)
+            let undoDiameter = checkDiameter * 0.42
+            let buttonY = min(
+                geo.size.height * 0.64,
+                geo.size.height - geo.safeAreaInsets.bottom - checkDiameter / 2 - 52
+            )
+
             ZStack {
-                InvertingFillView(
-                    fillColor: .black,
-                    fillFraction: currentStepFillProgress,
-                    direction: .bottomToTop
-                ) { textColor in
-                    activeContent(textColor: textColor, geo: geo)
+                InvertingFillView(fillFraction: engine.currentStepFillProgress) {
+                    activeContent(geo: geo)
                 }
                 .ignoresSafeArea()
 
-                let d = min(144, geo.size.width * 0.37)
                 Button {
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                    nextStep()
+                    engine.completeCurrentStep()
                 } label: {
                     Image(systemName: "checkmark")
-                        .font(.system(size: d * 0.46, weight: .medium))
+                        .font(.system(size: checkDiameter * 0.46, weight: .medium))
                         .foregroundStyle(Color.black)
-                        .frame(width: d, height: d)
+                        .frame(width: checkDiameter, height: checkDiameter)
                         .background(Circle().fill(Color.white))
                         .overlay(Circle().strokeBorder(Color.black.opacity(0.1), lineWidth: 2))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Complete step")
-                .position(
-                    x: geo.size.width / 2,
-                    y: min(
-                        geo.size.height * 0.64,
-                        geo.size.height - geo.safeAreaInsets.bottom - d / 2 - 52
+                .position(x: geo.size.width / 2, y: buttonY)
+
+                if engine.currentIndex > 0 {
+                    Button {
+                        engine.undoLastStep()
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                            .font(.system(size: undoDiameter * 0.4, weight: .medium))
+                            .foregroundStyle(Color.black.opacity(0.6))
+                            .frame(width: undoDiameter, height: undoDiameter)
+                            .background(Circle().fill(Color.white))
+                            .overlay(Circle().strokeBorder(Color.black.opacity(0.1), lineWidth: 1.5))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Go back to previous step")
+                    .position(
+                        x: geo.size.width / 2 - checkDiameter / 2 - 22 - undoDiameter / 2,
+                        y: buttonY
                     )
-                )
+                }
             }
         }
         .sheet(isPresented: $showingNotes) {
-            let notes = currentStep?.notes ?? ""
             ScrollView {
-                Text(notes)
+                Text(engine.currentStep?.notes ?? "")
                     .font(analogFont(22))
                     .multilineTextAlignment(.center)
                     .padding(32)
@@ -212,36 +291,52 @@ struct RoutineTimerView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
         }
+        .confirmationDialog("End this routine?", isPresented: $confirmingEnd, titleVisibility: .visible) {
+            Button("End Routine", role: .destructive) { engine.abandon() }
+            Button("Keep Going", role: .cancel) {}
+        } message: {
+            Text("You'll start from the first step next time.")
+        }
     }
 
-    private func activeContent(textColor: Color, geo: GeometryProxy) -> some View {
+    private func activeContent(geo: GeometryProxy) -> some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                ForEach(steps.indices, id: \.self) { i in
-                    Capsule()
-                        .fill(textColor.opacity(
-                            i < currentIndex ? 0.7 : i == currentIndex ? 1.0 : 0.2
-                        ))
-                        .frame(width: i == currentIndex ? 26 : 10, height: 5)
-                }
-            }
-            .animation(.easeInOut(duration: 0.3), value: currentIndex)
-            .padding(.top, geo.safeAreaInsets.top + 16)
-            .padding(.horizontal, 28)
+            HStack(alignment: .center) {
+                activeIconButton("xmark", label: "End routine") { confirmingEnd = true }
 
-            Spacer().frame(height: geo.size.height * 0.08)
+                Spacer()
+
+                HStack(spacing: 8) {
+                    ForEach(engine.steps.indices, id: \.self) { i in
+                        Capsule()
+                            .fill(Color.white.opacity(
+                                i < engine.currentIndex ? 0.7 : i == engine.currentIndex ? 1.0 : 0.2
+                            ))
+                            .frame(width: i == engine.currentIndex ? 26 : 10, height: 5)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.3), value: engine.currentIndex)
+
+                Spacer()
+
+                activeIconButton("pause.fill", label: "Pause routine") { engine.pause() }
+            }
+            .padding(.top, geo.safeAreaInsets.top + 8)
+            .padding(.horizontal, 20)
+
+            Spacer().frame(height: geo.size.height * 0.06)
 
             VStack(spacing: 10) {
-                Text((currentStep?.title ?? "").uppercased())
+                Text((engine.currentStep?.title ?? "").uppercased())
                     .font(analogFont(44))
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(textColor)
+                    .foregroundStyle(.white)
                     .minimumScaleFactor(0.55)
                     .lineLimit(2)
 
                 Text(stepTimeRangeText)
                     .font(analogFont(22))
-                    .foregroundStyle(textColor.opacity(0.6))
+                    .foregroundStyle(.white.opacity(0.6))
             }
             .padding(.horizontal, 28)
 
@@ -250,11 +345,12 @@ struct RoutineTimerView: View {
             Text(displayTime)
                 .font(digitFont(88))
                 .monospacedDigit()
-                .foregroundStyle(textColor)
+                .foregroundStyle(.white)
                 .minimumScaleFactor(0.35)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 16)
+                .accessibilityLabel(engine.isOvertime ? "\(displayTime) over" : "\(displayTime) remaining")
 
             Spacer()
 
@@ -262,29 +358,34 @@ struct RoutineTimerView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(routineStartClockText)
                         .font(analogFont(17))
-                        .foregroundStyle(textColor.opacity(0.35))
+                        .foregroundStyle(.white.opacity(0.35))
                     Text(routineEndClockText)
                         .font(analogFont(21))
-                        .foregroundStyle(textColor.opacity(0.6))
+                        .foregroundStyle(.white.opacity(0.6))
+                    Text(TimeFormatting.scheduleDeltaText(from: engine.scheduleDeltaSeconds))
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(1.5)
+                        .foregroundStyle(.white.opacity(0.5))
+                        .padding(.top, 2)
                 }
 
                 Spacer()
 
-                let stepNotes = currentStep?.notes ?? ""
-                if !stepNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if engine.currentStep?.hasNotes == true {
                     Button { showingNotes = true } label: {
                         Image(systemName: "note.text")
                             .font(.system(size: 22))
-                            .foregroundStyle(textColor.opacity(0.55))
+                            .foregroundStyle(.white.opacity(0.55))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Show notes")
                     .padding(.trailing, 14)
                 }
 
                 Text("NEXT: \(nextStepTitle.uppercased())")
                     .font(analogFont(19))
                     .tracking(1.5)
-                    .foregroundStyle(textColor.opacity(0.5))
+                    .foregroundStyle(.white.opacity(0.5))
                     .multilineTextAlignment(.trailing)
                     .lineLimit(2)
                     .minimumScaleFactor(0.55)
@@ -296,318 +397,44 @@ struct RoutineTimerView: View {
         .frame(width: geo.size.width, height: geo.size.height)
     }
 
-    // MARK: - Computed Properties
-
-    private var currentStep: RoutineStep? {
-        guard steps.indices.contains(currentIndex) else { return nil }
-        return steps[currentIndex]
+    private func activeIconButton(_ systemName: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.45))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 
-    private var secondsRemaining: Int {
-        guard let currentStep else { return 0 }
-        if isComplete { return 0 }
-        if let stepEndDate { return Int(ceil(stepEndDate.timeIntervalSince(now))) }
-        return pausedRemainingSeconds ?? currentStep.durationSeconds
-    }
-
-    private var isOvertime: Bool { secondsRemaining < 0 }
+    // MARK: - Text
 
     private var displayTime: String {
-        if isOvertime { return "+\(TimeFormatting.clockTime(from: secondsRemaining))" }
-        return TimeFormatting.clockTime(from: secondsRemaining)
+        if engine.isOvertime {
+            return "+\(TimeFormatting.clockTime(from: engine.overtimeSeconds))"
+        }
+        return TimeFormatting.clockTime(from: engine.secondsRemaining)
     }
 
     private var nextStepTitle: String {
-        guard steps.indices.contains(currentIndex + 1) else {
-            return isComplete ? "Done" : "Routine complete"
-        }
-        return steps[currentIndex + 1].title
+        engine.nextStep?.title ?? "Last step"
     }
 
     private var stepTimeRangeText: String {
-        let start = TimeFormatting.shortClockTime(from: displayedStepStartDate)
-        let end = TimeFormatting.shortClockTime(from: displayedStepEndDate)
+        let start = TimeFormatting.shortClockTime(from: engine.stepStartDate)
+        let end = TimeFormatting.shortClockTime(from: engine.stepEndDate)
         return "\(start) – \(end)"
     }
 
-    private var displayedStepStartDate: Date {
-        if let stepStartDate { return stepStartDate }
-        if let stepEndDate, let currentStep {
-            return stepEndDate.addingTimeInterval(TimeInterval(-currentStep.durationSeconds))
-        }
-        guard let currentStep else { return now }
-        let remaining = pausedRemainingSeconds ?? currentStep.durationSeconds
-        return now.addingTimeInterval(TimeInterval(-(currentStep.durationSeconds - remaining)))
-    }
-
-    private var displayedStepEndDate: Date {
-        if let stepEndDate { return stepEndDate }
-        return displayedStepStartDate.addingTimeInterval(TimeInterval(currentStep?.durationSeconds ?? 0))
-    }
-
-    private var currentStepFillProgress: Double {
-        guard let currentStep else { return 0 }
-        let elapsed = max(0, currentStep.durationSeconds - secondsRemaining)
-        return min(1, Double(elapsed) / Double(currentStep.durationSeconds))
-    }
-
-    private var routineElapsedSeconds: Int {
-        if let routineStartDate, isRunning {
-            return max(0, Int(now.timeIntervalSince(routineStartDate)))
-        }
-        return max(0, pausedRoutineElapsedSeconds ?? elapsedSecondsBeforeCurrentStep)
-    }
-
-    private var plannedRoutineDurationSeconds: Int {
-        steps.reduce(0) { $0 + $1.durationSeconds }
-    }
-
-    private var adjustedRoutineDurationSeconds: Int {
-        max(1, plannedRoutineDurationSeconds + accumulatedRoutineDeltaSeconds + currentOvertimeSeconds)
-    }
-
-    private var currentOvertimeSeconds: Int { max(0, -secondsRemaining) }
-
-    private var elapsedSecondsBeforeCurrentStep: Int {
-        guard currentIndex > 0 else { return 0 }
-        return steps.prefix(currentIndex).reduce(0) { $0 + $1.durationSeconds }
-    }
-
-    private var displayedRoutineStartDate: Date {
-        if let routineStartDate { return routineStartDate }
-        return now.addingTimeInterval(TimeInterval(-routineElapsedSeconds))
-    }
-
-    private var displayedRoutineEndDate: Date {
-        displayedRoutineStartDate.addingTimeInterval(TimeInterval(adjustedRoutineDurationSeconds))
-    }
-
     private var routineStartClockText: String {
-        TimeFormatting.shortClockTime(from: displayedRoutineStartDate)
+        guard let start = engine.routineStartDate else { return "" }
+        return TimeFormatting.shortClockTime(from: start)
     }
 
     private var routineEndClockText: String {
-        TimeFormatting.shortClockTime(from: displayedRoutineEndDate)
-    }
-
-    private var primaryButtonTitle: String {
-        if isComplete { return "Start Over" }
-        return isRunning ? "Pause" : "Start"
-    }
-
-    private var primaryButtonIcon: String {
-        if isComplete { return "arrow.counterclockwise" }
-        return isRunning ? "pause.fill" : "play.fill"
-    }
-
-    private var routineSignature: String {
-        steps.map { "\($0.sortOrder)|\($0.title)|\($0.durationSeconds)|\($0.autoNext)|\($0.notes)" }
-             .joined(separator: "::")
-    }
-
-    // MARK: - Actions
-
-    private func toggleRunning() {
-        if isComplete {
-            resetRoutine()
-            startRoutine()
-        } else if isRunning {
-            pauseRoutine()
-        } else {
-            startRoutine()
-        }
-    }
-
-    private func startRoutine() {
-        guard let currentStep else { return }
-        now = Date()
-        let remaining = pausedRemainingSeconds ?? currentStep.durationSeconds
-        stepEndDate = now.addingTimeInterval(TimeInterval(remaining))
-        stepStartDate = stepEndDate?.addingTimeInterval(TimeInterval(-currentStep.durationSeconds))
-        routineStartDate = now.addingTimeInterval(
-            TimeInterval(-(pausedRoutineElapsedSeconds ?? elapsedSecondsBeforeCurrentStep))
-        )
-        pausedRemainingSeconds = nil
-        pausedRoutineElapsedSeconds = nil
-        isComplete = false
-        isRunning = true
-        setScreenAwake(true)
-        runCountdownTask()
-        requestPermissionAndScheduleNotifications()
-    }
-
-    private func pauseRoutine() {
-        pausedRemainingSeconds = secondsRemaining
-        pausedRoutineElapsedSeconds = routineElapsedSeconds
-        timerTask?.cancel()
-        timerTask = nil
-        stepStartDate = nil
-        stepEndDate = nil
-        routineStartDate = nil
-        isRunning = false
-        setScreenAwake(false)
-        RoutineNotificationManager.cancelRoutineNotifications()
-    }
-
-    private func resetRoutine() {
-        currentIndex = 0
-        isRunning = false
-        isComplete = false
-        timerTask?.cancel()
-        timerTask = nil
-        stepStartDate = nil
-        stepEndDate = nil
-        pausedRemainingSeconds = nil
-        routineStartDate = nil
-        pausedRoutineElapsedSeconds = nil
-        accumulatedRoutineDeltaSeconds = 0
-        now = Date()
-        setScreenAwake(false)
-        RoutineNotificationManager.cancelRoutineNotifications()
-    }
-
-    private func nextStep() {
-        guard !steps.isEmpty else { resetRoutine(); return }
-        recordCurrentStepTimingDelta()
-        if steps.indices.contains(currentIndex + 1) {
-            currentIndex += 1
-            startCurrentStepFromBeginning(playSound: isRunning)
-        } else {
-            completeRoutine(playSound: true)
-        }
-    }
-
-    private func startCurrentStepFromBeginning(playSound: Bool) {
-        now = Date()
-        pausedRemainingSeconds = currentStep?.durationSeconds
-        if isRunning {
-            stepStartDate = now
-            stepEndDate = now.addingTimeInterval(TimeInterval(currentStep?.durationSeconds ?? 0))
-            if routineStartDate == nil {
-                routineStartDate = now.addingTimeInterval(
-                    TimeInterval(-(elapsedSecondsBeforeCurrentStep + accumulatedRoutineDeltaSeconds))
-                )
-            }
-            pausedRemainingSeconds = nil
-            pausedRoutineElapsedSeconds = nil
-            requestPermissionAndScheduleNotifications()
-        } else {
-            stepStartDate = nil
-            stepEndDate = nil
-            pausedRoutineElapsedSeconds = elapsedSecondsBeforeCurrentStep + accumulatedRoutineDeltaSeconds
-        }
-        isComplete = false
-        if playSound { RoutineSoundPlayer.playStepTransition(isEnabled: soundsEnabled) }
-    }
-
-    private func advanceAutoNextStepsIfNeeded() {
-        guard isRunning, let originalEndDate = stepEndDate, !steps.isEmpty else { return }
-        var index = currentIndex
-        var startDate = stepStartDate ?? originalEndDate.addingTimeInterval(
-            TimeInterval(-(currentStep?.durationSeconds ?? 0))
-        )
-        var endDate = originalEndDate
-        var didAdvance = false
-
-        while steps.indices.contains(index) {
-            let step = steps[index]
-            guard now >= endDate else { break }
-            guard step.autoNext else { break }
-            let nextIndex = index + 1
-            guard steps.indices.contains(nextIndex) else {
-                completeRoutine(playSound: true)
-                return
-            }
-            let next = steps[nextIndex]
-            index = nextIndex
-            startDate = endDate
-            endDate = startDate.addingTimeInterval(TimeInterval(next.durationSeconds))
-            didAdvance = true
-        }
-
-        if didAdvance {
-            currentIndex = index
-            stepStartDate = startDate
-            stepEndDate = endDate
-            pausedRemainingSeconds = nil
-            RoutineSoundPlayer.playStepTransition(isEnabled: soundsEnabled)
-            requestPermissionAndScheduleNotifications()
-        }
-    }
-
-    private func completeRoutine(playSound: Bool) {
-        isRunning = false
-        isComplete = true
-        timerTask?.cancel()
-        timerTask = nil
-        stepStartDate = nil
-        stepEndDate = nil
-        pausedRemainingSeconds = 0
-        pausedRoutineElapsedSeconds = adjustedRoutineDurationSeconds
-        routineStartDate = nil
-        setScreenAwake(false)
-        RoutineNotificationManager.cancelRoutineNotifications()
-        if playSound { RoutineSoundPlayer.playCompletion(isEnabled: soundsEnabled) }
-    }
-
-    private func runCountdownTask() {
-        timerTask?.cancel()
-        timerTask = Task { @MainActor in
-            while !Task.isCancelled {
-                now = Date()
-                advanceAutoNextStepsIfNeeded()
-                guard isRunning else { return }
-                try? await Task.sleep(for: .seconds(1))
-            }
-        }
-    }
-
-    private func refreshFromBackground() {
-        guard isRunning else { return }
-        now = Date()
-        advanceAutoNextStepsIfNeeded()
-        runCountdownTask()
-    }
-
-    private func recordCurrentStepTimingDelta() {
-        guard let currentStep else { return }
-        let elapsed = max(0, currentStep.durationSeconds - secondsRemaining)
-        accumulatedRoutineDeltaSeconds += elapsed - currentStep.durationSeconds
-    }
-
-    private func requestPermissionAndScheduleNotifications() {
-        guard isRunning, let stepStartDate else { return }
-        Task {
-            await RoutineNotificationManager.requestPermissionIfNeeded()
-            if isRunning {
-                RoutineNotificationManager.scheduleNotifications(
-                    steps: steps,
-                    currentIndex: currentIndex,
-                    stepStartDate: stepStartDate
-                )
-            }
-        }
-    }
-
-    private func handleScenePhaseChange(_ newPhase: ScenePhase) {
-        switch newPhase {
-        case .active:
-            refreshFromBackground()
-            setScreenAwake(isRunning)
-        case .inactive, .background:
-            setScreenAwake(false)
-        @unknown default:
-            setScreenAwake(false)
-        }
-    }
-
-    private func handleRoutineChanged() {
-        guard !steps.isEmpty else { resetRoutine(); return }
-        if currentIndex >= steps.count {
-            currentIndex = max(0, steps.count - 1)
-            startCurrentStepFromBeginning(playSound: false)
-        }
-        if isRunning { requestPermissionAndScheduleNotifications() }
+        TimeFormatting.shortClockTime(from: engine.projectedEndDate)
     }
 
     private func setScreenAwake(_ shouldStayAwake: Bool) {
@@ -618,12 +445,13 @@ struct RoutineTimerView: View {
 // MARK: - Idle Step Row
 
 private struct IdleStepRow: View {
-    let step: RoutineStep
+    let step: RunStep
     let index: Int
     let currentIndex: Int
     let isRoutineComplete: Bool
+    let isRoutineActive: Bool
 
-    private var isDone: Bool { isRoutineComplete || index < currentIndex }
+    private var isDone: Bool { isRoutineComplete || (isRoutineActive && index < currentIndex) }
     private var isCurrent: Bool { !isRoutineComplete && index == currentIndex }
 
     var body: some View {
@@ -670,7 +498,7 @@ private struct IdleStepRow: View {
                     }
                 }
 
-                if isCurrent, !step.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if isCurrent, step.hasNotes {
                     Text(step.notes)
                         .font(.callout)
                         .foregroundStyle(.secondary)

@@ -11,6 +11,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \RoutineStep.sortOrder, order: .forward) private var steps: [RoutineStep]
+    @AppStorage("hasSeededStarterRoutine") private var hasSeededStarterRoutine = false
 
     var body: some View {
         TabView {
@@ -21,18 +22,24 @@ struct ContentView: View {
 
             RoutineListView(steps: steps)
                 .tabItem {
-                    Label("Edit", systemImage: "list.bullet")
+                    Label("Routine", systemImage: "list.bullet")
                 }
         }
         .task {
             seedStarterRoutineIfNeeded()
+            repairDuplicateStepIDs()
+            // Asking here means the prompt shows over the idle screen, never over a running timer.
+            await RoutineNotificationManager.requestPermissionIfNeeded()
         }
     }
 
+    /// Seeds once per install. Deleting every step on purpose stays deleted.
     private func seedStarterRoutineIfNeeded() {
-        guard steps.isEmpty else {
-            return
-        }
+        guard !hasSeededStarterRoutine else { return }
+        hasSeededStarterRoutine = true
+
+        let existing = (try? modelContext.fetchCount(FetchDescriptor<RoutineStep>())) ?? 0
+        guard existing == 0 else { return }
 
         for (index, seed) in RoutineStep.starterRoutine.enumerated() {
             let step = RoutineStep(
@@ -42,18 +49,31 @@ struct ContentView: View {
                 notes: seed.notes,
                 sortOrder: index
             )
-
             modelContext.insert(step)
         }
 
         saveChanges()
     }
 
+    /// Steps created before `stepID` existed may share one migrated default.
+    private func repairDuplicateStepIDs() {
+        var seen = Set<UUID>()
+        var changed = false
+        for step in steps {
+            if seen.contains(step.stepID) {
+                step.stepID = UUID()
+                changed = true
+            }
+            seen.insert(step.stepID)
+        }
+        if changed { saveChanges() }
+    }
+
     private func saveChanges() {
         do {
             try modelContext.save()
         } catch {
-            print("Could not save starter routine: \(error)")
+            print("Could not save routine: \(error)")
         }
     }
 }
@@ -61,4 +81,5 @@ struct ContentView: View {
 #Preview {
     ContentView()
         .modelContainer(for: RoutineStep.self, inMemory: true)
+        .environment(RoutineEngine(store: nil))
 }

@@ -2,16 +2,16 @@
 //  FontHelpers.swift
 //  RISE_RoutineTimer
 //
-//  Mirrors the font setup from TwoMinRuleTimer.
+//  The "Fake Receipt" dot-matrix face is used for every routine label and
+//  for the countdown digits.
 //
 
-import CoreGraphics
 import SwiftUI
 
-func analogFont(_ size: CGFloat, weight: Font.Weight = .heavy) -> Font {
+func analogFont(_ size: CGFloat) -> Font {
     .custom("FakeReceipt-Regular", size: size)
 }
 
 func digitFont(_ size: CGFloat) -> Font {
-    .custom("FakeReceipt-Regular", size: size)
+    analogFont(size)
 }
