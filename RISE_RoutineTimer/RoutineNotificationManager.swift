@@ -23,8 +23,32 @@ enum RoutineNotificationManager {
         }
     }
 
-    static func cancelAll() {
-        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+    private static let runPrefix = "rise-run-"
+    private static let reminderIdentifier = "rise-daily-reminder"
+
+    /// Removes the alerts for the current run but leaves the daily reminder alone.
+    static func cancelRunAlerts() {
+        let center = UNUserNotificationCenter.current()
+        center.getPendingNotificationRequests { requests in
+            let ids = requests.map(\.identifier).filter { $0.hasPrefix(runPrefix) }
+            center.removePendingNotificationRequests(withIdentifiers: ids)
+        }
+    }
+
+    /// A repeating "time to start" nudge at the start-by time, or nothing.
+    static func scheduleDailyReminder(at components: DateComponents?, targetText: String) {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [reminderIdentifier])
+        guard let components else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Time to start your routine"
+        content.body = "Start now to be done by \(targetText)."
+        content.sound = .default
+        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
+        center.add(UNNotificationRequest(identifier: reminderIdentifier, content: content, trigger: trigger)) { error in
+            if let error { print("Could not schedule reminder: \(error)") }
+        }
     }
 
     static func clearDelivered() {
@@ -33,7 +57,7 @@ enum RoutineNotificationManager {
 
     static func schedule(_ alerts: [PlannedAlert], steps: [RunStep], now: Date = Date()) {
         let center = UNUserNotificationCenter.current()
-        center.removeAllPendingNotificationRequests()
+        cancelRunAlerts()
 
         for alert in alerts {
             let interval = alert.fireDate.timeIntervalSince(now)
@@ -46,7 +70,7 @@ enum RoutineNotificationManager {
 
             switch alert.kind {
             case .stepEnd:
-                identifier = "rise-step-\(alert.stepIndex)"
+                identifier = "\(runPrefix)step-\(alert.stepIndex)"
                 content.title = "\(step.title) is done"
                 if steps.indices.contains(alert.stepIndex + 1) {
                     content.body = "Next: \(steps[alert.stepIndex + 1].title)"
@@ -54,11 +78,11 @@ enum RoutineNotificationManager {
                     content.body = "That was the last step."
                 }
             case .overtime(let minutes):
-                identifier = "rise-over-\(alert.stepIndex)-\(minutes)"
+                identifier = "\(runPrefix)over-\(alert.stepIndex)-\(minutes)"
                 content.title = "\(step.title) is \(minutes) min over"
                 content.body = "Tap the checkmark when you're done."
             case .completion:
-                identifier = "rise-complete"
+                identifier = "\(runPrefix)complete"
                 content.title = "Routine complete"
                 content.body = "Nice work. Your morning routine is finished."
             }

@@ -12,13 +12,15 @@ import Foundation
 nonisolated struct RunStep: Codable, Equatable, Identifiable {
     var id: UUID
     var title: String
+    var icon: String
     var durationSeconds: Int
     var autoNext: Bool
     var notes: String
 
-    init(id: UUID = UUID(), title: String, durationSeconds: Int, autoNext: Bool = true, notes: String = "") {
+    init(id: UUID = UUID(), title: String, icon: String = "", durationSeconds: Int, autoNext: Bool = true, notes: String = "") {
         self.id = id
         self.title = title
+        self.icon = icon
         self.durationSeconds = max(1, durationSeconds)
         self.autoNext = autoNext
         self.notes = notes
@@ -35,6 +37,7 @@ extension RunStep {
         self.init(
             id: model.stepID,
             title: model.title,
+            icon: model.icon,
             durationSeconds: model.durationSeconds,
             autoNext: model.autoNext,
             notes: model.notes
@@ -82,7 +85,8 @@ nonisolated struct RoutineRun: Codable, Equatable {
 
 /// Summary handed out when a run finishes or is abandoned. Session history
 /// (a later phase) persists these.
-nonisolated struct SessionResult: Codable, Equatable {
+nonisolated struct SessionResult: Codable, Equatable, Identifiable {
+    var id: Date { startedAt }
     var startedAt: Date
     var endedAt: Date
     var plannedSeconds: Int

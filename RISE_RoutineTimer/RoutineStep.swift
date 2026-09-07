@@ -16,6 +16,9 @@ final class RoutineStep {
     // The task name users see in the editor and timer.
     var title: String
 
+    // Optional single emoji shown next to the title.
+    var icon: String = ""
+
     // Store time as total seconds so the timer math stays simple.
     var durationSeconds: Int
 
@@ -32,6 +35,7 @@ final class RoutineStep {
     init(
         stepID: UUID = UUID(),
         title: String,
+        icon: String = "",
         durationSeconds: Int,
         autoNext: Bool = true,
         notes: String = "",
@@ -39,6 +43,7 @@ final class RoutineStep {
     ) {
         self.stepID = stepID
         self.title = title
+        self.icon = icon
         self.durationSeconds = max(1, durationSeconds)
         self.autoNext = autoNext
         self.notes = notes
@@ -52,24 +57,28 @@ extension RoutineStep {
     static let starterRoutine: [RoutineStepSeed] = [
         RoutineStepSeed(
             title: "Drink Water",
+            icon: "💧",
             durationSeconds: 2 * 60,
             autoNext: true,
             notes: "Start gently. A glass of water helps make the first win easy."
         ),
         RoutineStepSeed(
             title: "Stretch",
+            icon: "🧘",
             durationSeconds: 5 * 60,
             autoNext: true,
             notes: "Loosen your neck, shoulders, hips, and back."
         ),
         RoutineStepSeed(
             title: "Wash Up",
+            icon: "🚿",
             durationSeconds: 10 * 60,
             autoNext: false,
             notes: "Auto-next is off here so you can finish without rushing."
         ),
         RoutineStepSeed(
             title: "Plan The Day",
+            icon: "📝",
             durationSeconds: 5 * 60,
             autoNext: true,
             notes: "Pick the top one or two things that will make today successful."
@@ -80,6 +89,7 @@ extension RoutineStep {
 // A lightweight seed type keeps the default routine separate from SwiftData.
 struct RoutineStepSeed {
     let title: String
+    let icon: String
     let durationSeconds: Int
     let autoNext: Bool
     let notes: String
@@ -88,4 +98,12 @@ struct RoutineStepSeed {
 extension RoutineStep {
     /// Anything shorter than this is not a usable timer step.
     static let minimumDurationSeconds = 5
+
+    static let untitled = "Untitled Step"
+
+    /// Keeps only the first grapheme cluster, so the icon is one emoji.
+    static func normalizedIcon(_ text: String) -> String {
+        guard let first = text.trimmingCharacters(in: .whitespacesAndNewlines).first else { return "" }
+        return String(first)
+    }
 }

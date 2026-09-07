@@ -13,17 +13,36 @@ struct ContentView: View {
     @Query(sort: \RoutineStep.sortOrder, order: .forward) private var steps: [RoutineStep]
     @AppStorage("hasSeededStarterRoutine") private var hasSeededStarterRoutine = false
 
+    /// Today is the landing screen: the morning starts before the routine does.
+    @State private var selectedTab: Tab = .today
+
+    private enum Tab: Hashable { case today, run, routine, history }
+
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
+            TodayView(steps: steps, onStartRoutine: { selectedTab = .run })
+                .tabItem {
+                    Label("Today", systemImage: "sun.max")
+                }
+                .tag(Tab.today)
+
             RoutineTimerView(steps: steps)
                 .tabItem {
                     Label("Run", systemImage: "timer")
                 }
+                .tag(Tab.run)
 
             RoutineListView(steps: steps)
                 .tabItem {
                     Label("Routine", systemImage: "list.bullet")
                 }
+                .tag(Tab.routine)
+
+            HistoryView(steps: steps)
+                .tabItem {
+                    Label("History", systemImage: "chart.xyaxis.line")
+                }
+                .tag(Tab.history)
         }
         .task {
             seedStarterRoutineIfNeeded()
@@ -44,6 +63,7 @@ struct ContentView: View {
         for (index, seed) in RoutineStep.starterRoutine.enumerated() {
             let step = RoutineStep(
                 title: seed.title,
+                icon: seed.icon,
                 durationSeconds: seed.durationSeconds,
                 autoNext: seed.autoNext,
                 notes: seed.notes,
@@ -80,6 +100,6 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: RoutineStep.self, inMemory: true)
+        .modelContainer(for: [RoutineStep.self, RoutineSession.self, MorningLog.self], inMemory: true)
         .environment(RoutineEngine(store: nil))
 }

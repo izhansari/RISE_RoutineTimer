@@ -15,9 +15,11 @@ final class RoutineAlertCoordinator {
 
     private let engine: RoutineEngine
     private let alerts = RoutineAlerts()
+    private let recordSession: (SessionResult) -> Void
 
-    init(engine: RoutineEngine) {
+    init(engine: RoutineEngine, recordSession: @escaping (SessionResult) -> Void) {
         self.engine = engine
+        self.recordSession = recordSession
         engine.onEvent = { [weak self] event in
             self?.handle(event)
         }
@@ -43,7 +45,7 @@ final class RoutineAlertCoordinator {
         case .resumed:
             syncNotifications()
         case .paused, .reset:
-            RoutineNotificationManager.cancelAll()
+            RoutineNotificationManager.cancelRunAlerts()
             alerts.stopSpeaking()
         case .stepStarted(let index, _):
             if engine.steps.indices.contains(index) {
@@ -59,11 +61,13 @@ final class RoutineAlertCoordinator {
                 alerts.overtime(engine.steps[index], sounds: soundsEnabled, voice: voiceEnabled)
             }
         case .completed(let result):
-            RoutineNotificationManager.cancelAll()
+            RoutineNotificationManager.cancelRunAlerts()
             alerts.completed(result, sounds: soundsEnabled, voice: voiceEnabled)
-        case .abandoned:
-            RoutineNotificationManager.cancelAll()
+            recordSession(result)
+        case .abandoned(let result):
+            RoutineNotificationManager.cancelRunAlerts()
             alerts.stopSpeaking()
+            recordSession(result)
         }
     }
 

@@ -18,25 +18,24 @@ struct RISE_RoutineTimerApp: App {
     @State private var engine: RoutineEngine
     private let alertCoordinator: RoutineAlertCoordinator
 
+    private let sharedModelContainer: ModelContainer
+
     init() {
         registerBundledFonts()
-        let engine = RoutineEngine()
-        _engine = State(initialValue: engine)
-        alertCoordinator = RoutineAlertCoordinator(engine: engine)
-    }
 
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema([
-            RoutineStep.self,
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
+        let schema = Schema([RoutineStep.self, RoutineSession.self, MorningLog.self])
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            sharedModelContainer = try ModelContainer(for: schema, configurations: [configuration])
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
-    }()
+
+        let engine = RoutineEngine()
+        let recorder = SessionRecorder(context: sharedModelContainer.mainContext)
+        _engine = State(initialValue: engine)
+        alertCoordinator = RoutineAlertCoordinator(engine: engine) { recorder.record($0) }
+    }
 
     var body: some Scene {
         WindowGroup {

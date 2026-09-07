@@ -125,20 +125,49 @@ Everything below shipped; 23 engine unit tests pass. Also added: voice announcem
 5. **Permission timing**: request on idle screen, not on Start.
 6. **Small fixes**: A4, A8, A10, A11 (target + display name + portrait), A12, A14.
 
-### Run 2 (next) — Feedback loop
+### Run 2 — Feedback loop ✓ DONE (2026-09-06)
+
+Shipped: `RoutineSession` SwiftData model (step results stored as a Codable array, every property defaulted for CloudKit), `SessionRecorder` fed by engine events (abandoned runs kept only if a step was completed), `SessionSummaryView` sheet on completion, `HistoryView` tab (average / best / average start / streak tiles, 5-vs-5 trend, per-step suggestions with one-tap apply, swipe-to-delete), `RoutineStats` pure math with 7 unit tests, and a "Last X · usually start Y · N day streak" line on the READY screen.
 7. `RoutineSession` + `StepRecord`, saved on complete and on end-early.
 8. Completion summary sheet.
 9. History tab with averages, trend, streak.
 10. Per-step suggestions with one-tap apply.
 11. Idle screen context line.
 
-### Run 3 — Planning + polish
+### Run 3 — Planning + polish ✓ DONE (2026-09-06)
+
+Shipped: `TargetSchedule` (finish-by time stored as minutes after midnight; start-by, spare time, reminder components; unit tested), Routine tab "Target" section with time picker and optional daily start-by reminder (run alerts are now cancelled by identifier prefix so the reminder survives), start-by guidance on the READY screen, "X TO SPARE / PAST TARGET" line on the active screen, emoji step icons (model field, editor field limited to one grapheme, shown in all three lists and the active screen), delete from the editor, duplicate via leading swipe, empty-title guard, Restore Starter Routine in the tab menu. The routine-level vertical progress bar was skipped: the ahead/behind and target lines cover the need.
 12. Target end time and start-by computation.
 13. Step icons.
 14. Editor polish (A13), duplicate step, restore starter routine.
 15. Routine-level progress bar if still wanted.
 
-### Later
+### Run 4 — Active screen rebuild + morning accountability ✓ DONE (2026-09-06)
+
+Owner's brief: pull in the tracking from the MorningCheckin web app, and make the running screen feel like a
+premium iOS app while keeping the FLIP timer's minimal-tech look.
+
+**Active screen.** Rebuilt as `ActiveRoutineView`. The blend-mode fill was replaced with FLIP's two-layer
+`InvertingFillView` (white page + dark type, coloured page + white type, masked), so type stays crisp across the
+fill line, emoji render without an escape hatch, and the fill can be coloured. The fill colour is now the
+ahead/behind signal (`RoutinePace`: green on plan → ochre slipping → deep red behind, the last matching
+MorningCheckin's over-budget ink). Magic height fractions and `.position()` arithmetic are gone; controls sit in a
+sibling overlay as white chips (undo · complete · notes, centred with placeholders so the big button never moves),
+and the old four-number corner is now three aligned micro-stats.
+
+**Accountability.** `MorningLog` records the wake time; `MorningRecord.join` merges it with `RoutineSession`.
+`MorningMetrics` ports `metrics.js` wholesale: snooze, activation latency, duration, 7/30-day rolling baselines,
+wake spread (standard deviation), weekly budgets counting overruns only, missed-day counters, streak, and insight
+sentences — 23 unit tests. A new **Today** tab is the landing screen: wake CTA ("I'M AWAKE" → "START ROUTINE"),
+day timeline, live performance tiles with a selectable baseline, budget bars and an insight card. History gained
+Swift Charts (snooze bars, activation bars, duration line, each with an average rule), the rolling-baselines
+table and missed days. Wake goal and budgets are editable on the Routine tab; `DebugSeed` provides 13 days of
+sample history in DEBUG builds.
+
+Not done: negative activation is reported as "—" rather than prompting a fix; the timeline is not scrubbable
+(the web app's "touch to explore"); Today does not yet surface per-step suggestions.
+
+### Later (next)
 16. Live Activity / Dynamic Island.
 17. iCloud sync via SwiftData + CloudKit (decide **before** run 2: CloudKit requires all properties to have defaults and all relationships optional, which constrains the `RoutineSession` design).
 18. Multiple routines / profiles if "our routine" means more than one person.
