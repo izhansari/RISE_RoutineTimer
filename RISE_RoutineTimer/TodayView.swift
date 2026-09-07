@@ -18,11 +18,14 @@ import SwiftUI
 //
 // Carried over from the web app so a morning reads the same in both places.
 
+/// The timeline's inks, taken from the app's own palette rather than the web
+/// app's. Waking is scored on the same green / amber / red the running timer
+/// uses for pace, so "late" looks the same wherever it appears.
 private enum MorningInk {
-    static let amber = Color(hex: 0xD97706)   // activation
-    static let blue  = Color(hex: 0x2563EB)   // routine
-    static let good  = Color(hex: 0x16A34A)
-    static let bad   = Color(hex: 0xCC0000)
+    static let activation = Color(hex: 0x4A32DC)   // wake → routine start
+    static let good       = Color(hex: 0x0FA057)
+    static let warn       = Color(hex: 0xE8890A)
+    static let bad        = Color(hex: 0xDB2118)
 }
 
 /// Which baseline today is measured against.
@@ -53,9 +56,11 @@ struct TodayView: View {
     @AppStorage(MorningSettings.snoozeBudgetKey) private var snoozeBudget = MorningSettings.defaultSnoozeBudget
     @AppStorage(MorningSettings.activationBudgetKey) private var activationBudget = MorningSettings.defaultActivationBudget
     @AppStorage("todayBaselinePeriod") private var baselineRaw = BaselinePeriod.sevenDay.rawValue
+    @AppStorage(FillTheme.storageKey) private var fillThemeRaw = FillTheme.default.rawValue
 
     @State private var insightIndex = 0
     @State private var editingWake = false
+    @State private var confirmingUndoWake = false
 
     /// Steps to hand the engine when the routine is started from here.
     let steps: [RoutineStep]
@@ -126,6 +131,16 @@ struct TodayView: View {
             .navigationTitle("Today")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $editingWake) { wakeEditor }
+            .receiptDialog(
+                isPresented: $confirmingUndoWake,
+                title: "Undo wake up?",
+                message: "Today's wake time will be cleared. Your snooze and activation numbers for this morning go with it.",
+                confirmTitle: "Undo it",
+                cancelTitle: "Keep it",
+                onConfirm: {
+                    MorningLogStore(context: modelContext).setWake(nil, on: Date(), existing: logs)
+                }
+            )
         }
     }
 
@@ -177,7 +192,8 @@ struct TodayView: View {
                     start: effectiveStart,
                     end: today.routineEndAt,
                     now: now,
-                    isRunning: engine.hasActiveRun
+                    isRunning: engine.hasActiveRun,
+                    routineColor: (FillTheme(rawValue: fillThemeRaw) ?? .default).color
                 )
                 .padding(.top, 14)
             }
@@ -334,10 +350,20 @@ struct TodayView: View {
                 MorningLogStore(context: modelContext).recordWake(at: Date(), existing: logs)
             }
         case .start:
-            cta("START ROUTINE", icon: "play.fill") {
-                if engine.isComplete { engine.reset() }
-                engine.start(steps: steps.map(RunStep.init))
-                onStartRoutine()
+            VStack(spacing: 10) {
+                cta("START ROUTINE", icon: "play.fill") {
+                    if engine.isComplete { engine.reset() }
+                    engine.start(steps: steps.map(RunStep.init))
+                    onStartRoutine()
+                }
+
+                // "I'm awake" is one tap and easy to hit by accident, and it
+                // starts the clock on the whole morning's numbers.
+                Button("UNDO WAKE UP") { confirmingUndoWake = true }
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(1.6)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 4)
             }
         case .running:
             cta("BACK TO ROUTINE", icon: "timer", filled: false) { onStartRoutine() }
@@ -568,6 +594,9 @@ private struct DayTimeline: View {
     let end: Date?
     let now: Date
     let isRunning: Bool
+    /// The routine leg is drawn in whatever colour the timer fills with, so
+    /// the two screens agree about what "the routine" looks like.
+    let routineColor: Color
 
     private let trackY: CGFloat = 30
     private let padding: TimeInterval = 20 * 60
@@ -599,7 +628,7 @@ private struct DayTimeline: View {
         guard let wake else { return .secondary }
         let late = wake.timeIntervalSince(goal) / 60
         if late <= 0 { return MorningInk.good }
-        if late <= 30 { return MorningInk.amber }
+        if late <= 30 { return MorningInk.warn }
         return MorningInk.bad
     }
 
@@ -625,16 +654,16 @@ private struct DayTimeline: View {
 
                 // Activation segment, then the routine segment.
                 if let wake, let start, start >= wake {
-                    segment(from: wake, to: start, width: width, color: MorningInk.amber)
+                    segment(from: wake, to: start, width: width, color: MorningInk.activation)
                 }
                 if let start {
-                    segment(from: start, to: end ?? (isRunning ? now : start), width: width, color: MorningInk.blue)
+                    segment(from: start, to: end ?? (isRunning ? now : start), width: width, color: routineColor)
                 }
 
                 dot(at: goal, width: width, color: .secondary, filled: false)
                 if let wake { dot(at: wake, width: width, color: wakeColor, filled: true) }
-                if let start { dot(at: start, width: width, color: MorningInk.amber, filled: true) }
-                if let end { dot(at: end, width: width, color: MorningInk.blue, filled: true) }
+                if let start { dot(at: start, width: width, color: MorningInk.activation, filled: true) }
+                if let end { dot(at: end, width: width, color: routineColor, filled: true) }
 
                 // Captions drop to a second row when they would collide, so a
                 // wake and a finish minutes apart stay readable.
@@ -668,7 +697,7 @@ private struct DayTimeline: View {
             items.append(TimelineCaption(id: "wake", label: "WOKE", date: wake, x: fraction(wake) * width, color: wakeColor))
         }
         if let end {
-            items.append(TimelineCaption(id: "end", label: "DONE", date: end, x: fraction(end) * width, color: MorningInk.blue))
+            items.append(TimelineCaption(id: "end", label: "DONE", date: end, x: fraction(end) * width, color: routineColor))
         }
 
         items.sort { $0.x < $1.x }

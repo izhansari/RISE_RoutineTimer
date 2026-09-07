@@ -15,25 +15,76 @@ protocol RunStore {
     func save(_ run: RoutineRun?)
 }
 
-final class UserDefaultsRunStore: RunStore {
-    private let key = "activeRoutineRun"
-    private let defaults: UserDefaults
+/// Stores the in-flight run as a file in Application Support.
+///
+/// This used to live in `UserDefaults`, and an ended routine could come back
+/// from the dead: `UserDefaults` hands writes to `cfprefsd`, which batches
+/// them, so a removal could still be pending when the process died — and iOS
+/// *will* kill a backgrounded app. The earlier save had committed, the removal
+/// had not, and the next launch restored a run the user had already ended.
+/// `synchronize()` did not reliably force it.
+///
+/// A run snapshot was never really a preference anyway. An atomic file write
+/// lands immediately and deleting the file is immediate, so the whole class of
+/// problem goes away.
+final class FileRunStore: RunStore {
+    private let url: URL
+    /// Only used to migrate a run written by an older build, once.
+    private let legacyDefaults: UserDefaults?
+    private let legacyKey = "activeRoutineRun"
 
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
+    /// Marks the one-time read of the old UserDefaults home as done.
+    ///
+    /// This has to be its own file rather than "the run file exists": ending a
+    /// routine deletes the run file, and without a separate marker the next
+    /// launch would fall back to UserDefaults and restore the very run that was
+    /// just ended — which is exactly the bug this store was written to fix,
+    /// reappearing through the migration path.
+    private let migratedMarker: URL
+
+    init(directory: URL? = nil, legacyDefaults: UserDefaults? = .standard) {
+        let folder = directory ?? FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        url = folder.appendingPathComponent("active-run.json")
+        migratedMarker = folder.appendingPathComponent("active-run.migrated")
+        self.legacyDefaults = legacyDefaults
     }
 
     func load() -> RoutineRun? {
-        guard let data = defaults.data(forKey: key) else { return nil }
+        if let data = try? Data(contentsOf: url) {
+            return try? JSONDecoder().decode(RoutineRun.self, from: data)
+        }
+        guard !hasMigrated else { return nil }
+        markMigrated()
+        guard let legacyDefaults, let data = legacyDefaults.data(forKey: legacyKey) else { return nil }
+        legacyDefaults.removeObject(forKey: legacyKey)
         return try? JSONDecoder().decode(RoutineRun.self, from: data)
     }
 
     func save(_ run: RoutineRun?) {
+        // Any save means this store owns the run from here on.
+        markMigrated()
+        legacyDefaults?.removeObject(forKey: legacyKey)
+
         guard let run, let data = try? JSONEncoder().encode(run) else {
-            defaults.removeObject(forKey: key)
+            try? FileManager.default.removeItem(at: url)
             return
         }
-        defaults.set(data, forKey: key)
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            print("Could not save the active run: \(error)")
+        }
+    }
+
+    private var hasMigrated: Bool {
+        FileManager.default.fileExists(atPath: migratedMarker.path)
+    }
+
+    private func markMigrated() {
+        guard !hasMigrated else { return }
+        try? Data().write(to: migratedMarker, options: .atomic)
     }
 }
 
@@ -50,7 +101,6 @@ final class RoutineEngine {
         case resumed
         case paused
         case stepStarted(index: Int, auto: Bool)
-        case steppedBack(index: Int)
         case overtimeStarted(index: Int)
         case completed(SessionResult)
         case abandoned(SessionResult)
@@ -69,7 +119,7 @@ final class RoutineEngine {
     @ObservationIgnored private let usesWallClock: Bool
     @ObservationIgnored private var clockTask: Task<Void, Never>?
 
-    init(store: RunStore? = UserDefaultsRunStore(), usesWallClock: Bool = true, now: Date = Date()) {
+    init(store: RunStore? = FileRunStore(), usesWallClock: Bool = true, now: Date = Date()) {
         self.store = store
         self.usesWallClock = usesWallClock
         self.now = now
@@ -159,6 +209,22 @@ final class RoutineEngine {
     /// Time spent doing steps, excluding pauses.
     var activeElapsedSeconds: Int {
         completedActualSeconds + Int(stepElapsed.rounded(.down))
+    }
+
+    /// Position in the routine by the *plan*: the planned time of every step
+    /// finished so far, plus however much of the current step's planned time
+    /// has passed, as a fraction of the whole.
+    ///
+    /// This is what a progress bar should mean. Finishing a step early jumps
+    /// it forward to the step boundary; running over holds it there. The
+    /// obvious alternative — `activeElapsedSeconds / plannedTotalSeconds` —
+    /// barely moved when a five-minute step was done in one.
+    var routinePlanProgress: Double {
+        let total = plannedTotalSeconds
+        guard total > 0 else { return 0 }
+        let finished = results.reduce(0) { $0 + $1.plannedSeconds }
+        let current = min(stepElapsed, Double(currentStep?.durationSeconds ?? 0))
+        return min(1, (Double(finished) + current) / Double(total))
     }
 
     /// Positive means behind plan, negative means ahead.
@@ -269,21 +335,72 @@ final class RoutineEngine {
         }
     }
 
-    /// Returns to the previous step. Time spent on the current step is credited
-    /// to the previous one, since the user was evidently still doing it.
-    func undoLastStep(at date: Date = Date()) {
-        guard var updated = run, updated.phase == .running, updated.currentIndex > 0,
-              let last = updated.results.popLast() else { return }
+    /// Skips the current step. It is still recorded — with `skipped` set and
+    /// whatever time was already spent on it — so the session's actual time
+    /// stays honest and the step simply contributes no sample to its own
+    /// duration average.
+    func skipCurrentStep(at date: Date = Date()) {
+        guard var updated = run, updated.phase == .running,
+              updated.steps.indices.contains(updated.currentIndex) else { return }
         now = date
+        let step = updated.steps[updated.currentIndex]
         let elapsed = Self.elapsed(of: updated, at: date)
-        updated.currentIndex -= 1
-        updated.stepAccumulated = Double(last.actualSeconds) + elapsed
+        updated.results.append(StepResult(
+            stepID: step.id,
+            title: step.title,
+            plannedSeconds: step.durationSeconds,
+            actualSeconds: Int(elapsed.rounded()),
+            autoAdvanced: false,
+            skipped: true
+        ))
+
+        if updated.currentIndex + 1 < updated.steps.count {
+            updated.currentIndex += 1
+            updated.stepAccumulated = 0
+            updated.stepResumedAt = date
+            updated.overtimeAnnounced = false
+            run = updated
+            persist()
+            emit(.stepStarted(index: updated.currentIndex, auto: false))
+        } else {
+            finish(updated, endedAt: date)
+        }
+    }
+
+    /// Defers the current step to the end of the run.
+    ///
+    /// Nothing is recorded: the step has not happened, and it will start from
+    /// its full duration when it comes back around. The seconds already spent
+    /// on it are dropped, which is the honest reading of "I'll do this later"
+    /// and is usually only a few seconds anyway.
+    ///
+    /// A no-op on the last step, where there is no "end" to move to.
+    func moveCurrentStepToEnd(at date: Date = Date()) {
+        guard var updated = run, updated.phase == .running,
+              updated.steps.indices.contains(updated.currentIndex),
+              updated.currentIndex + 1 < updated.steps.count else { return }
+        now = date
+        let step = updated.steps.remove(at: updated.currentIndex)
+        updated.steps.append(step)
+        // currentIndex is unchanged and now points at what was the next step.
+        updated.stepAccumulated = 0
         updated.stepResumedAt = date
-        let duration = Double(updated.steps[updated.currentIndex].durationSeconds)
-        updated.overtimeAnnounced = updated.stepAccumulated >= duration
+        updated.overtimeAnnounced = false
         run = updated
         persist()
-        emit(.steppedBack(index: updated.currentIndex))
+        emit(.stepStarted(index: updated.currentIndex, auto: false))
+    }
+
+    /// Applies a notes edit made during the run. The run holds frozen copies
+    /// of the steps, so without this the screen would keep showing the old
+    /// text until the next run started.
+    func updateNotes(_ notes: String, forStepID stepID: UUID) {
+        guard var updated = run,
+              let index = updated.steps.firstIndex(where: { $0.id == stepID }),
+              updated.steps[index].notes != notes else { return }
+        updated.steps[index].notes = notes
+        run = updated
+        persist()
     }
 
     func abandon(at date: Date = Date()) {

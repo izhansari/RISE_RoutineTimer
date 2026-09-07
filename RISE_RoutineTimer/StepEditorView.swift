@@ -6,17 +6,30 @@ struct StepEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var step: RoutineStep
     @State private var confirmingDelete = false
+    @State private var pickingIcon = false
 
     var body: some View {
         Form {
             Section {
                 HStack(spacing: 12) {
-                    TextField("", text: iconBinding, prompt: Text("🙂"))
-                        .font(.system(size: 26))
-                        .multilineTextAlignment(.center)
+                    Button {
+                        pickingIcon = true
+                    } label: {
+                        Group {
+                            if step.icon.isEmpty {
+                                Image(systemName: "face.smiling")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text(step.icon).font(.system(size: 26))
+                            }
+                        }
                         .frame(width: 44, height: 44)
                         .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 10))
-                        .accessibilityLabel("Icon emoji")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(step.icon.isEmpty ? "Choose an icon" : "Icon \(step.icon), change it")
+
                     TextField("Title", text: $step.title)
                         .font(analogFont(17))
                         .textInputAutocapitalization(.words)
@@ -52,9 +65,15 @@ struct StepEditorView: View {
                 .frame(height: 150)
             }
 
-            Section("Notes") {
+            Section {
                 TextEditor(text: $step.notes)
+                    .font(.system(size: 16))
                     .frame(minHeight: 120)
+                Toggle("Open automatically", isOn: $step.autoShowNotes)
+            } header: {
+                Text("Notes")
+            } footer: {
+                Text("When on, this note opens by itself as the step starts. You can also add or edit notes while the routine is running.")
             }
 
             Section {
@@ -67,6 +86,9 @@ struct StepEditorView: View {
         .confirmationDialog("Delete this step?", isPresented: $confirmingDelete, titleVisibility: .visible) {
             Button("Delete Step", role: .destructive) { deleteStep() }
             Button("Keep", role: .cancel) {}
+        }
+        .sheet(isPresented: $pickingIcon) {
+            GlyphPickerView(selection: iconBinding)
         }
         .onDisappear {
             if step.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

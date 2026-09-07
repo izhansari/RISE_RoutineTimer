@@ -167,8 +167,182 @@ sample history in DEBUG builds.
 Not done: negative activation is reported as "—" rather than prompting a fix; the timeline is not scrubbable
 (the web app's "touch to explore"); Today does not yet surface per-step suggestions.
 
+### Run 5 — Active-screen feedback pass ✓ DONE (2026-09-06)
+
+Six items from the owner after using Run 4:
+
+1. **Auto-next was invisible.** A status pill under the countdown now reads `AUTO-ADVANCES` or `TAP WHEN DONE`.
+2. **Overtime needed to be glanceable, but the colour must not persist across steps.** The fill was repainted from
+   the cumulative `scheduleDeltaSeconds` to a per-step `StepPace`: the chosen colour on time, amber once the step
+   runs over, red past two minutes. It resets each step on its own. Only manual steps can reach it, since
+   auto-next steps are advanced the moment their time is up. The pill also switches to `OVERTIME · TAP WHEN DONE`,
+   so the state does not depend on colour alone.
+3. **Pausing looked like ending.** `PauseOverlay` keeps the user on the timer and blurs it behind a scrim.
+   Blur rather than a heavier scrim: the overlay restates the step and countdown, and dimming alone left the
+   dot-matrix type below legible as a second, offset copy.
+4. **The end-routine prompt was ugly.** `ReceiptDialog` — hard-bordered card, tracked receipt caps, a rule under
+   the title, square filled/outlined buttons. Used for confirmations shown over the timer.
+5. **Selectable timer colour.** `FillTheme`: Forest, Ocean, Indigo, Plum, Graphite, picked in the Routine tab.
+   No ambers or reds — they are reserved for overtime, and a test enforces it.
+6. **Icon entry only kept the first character.** `GlyphPickerView` + `GlyphCatalog`: a searchable, curated set of
+   typographic marks and emoji with keywords, plus an explicit slot for a single typed letter or number.
+
+72 tests. Not done: settings-surface dialogs still use the system sheet; the glyph catalog is curated rather than
+the full emoji set.
+
+### Run 6 — Active-screen density pass ✓ DONE (2026-09-07)
+
+The owner found the screen too dense and disliked the auto-advance badge. Five candidate layouts were mocked in
+the real font (a throwaway `MockupGalleryView`, since deleted) and style **C — "silent until it matters"** was
+picked, then refined:
+
+- **Removed:** the PACE / DONE / SPARE row, the step time-range line, the `AUTO-ADVANCES` pill, the undo button
+  *and the go-back-a-step feature itself* (`undoLastStep` and `.steppedBack` are gone from the engine), and the
+  notes chip. The screen went from ten bands to five.
+- **One line, conditionally.** Under the countdown, only when the routine is at risk: `WON'T MAKE 7:30AM`, else
+  `X BEHIND` past `RoutinePace.behindAlertSeconds`. Step-level overtime stays the fill's job.
+- **Notes moved to the step name.** Tapping the title opens the sheet; the tap target rides an anchor preference
+  so it can live in the control overlay while the text stays inside the (twice-built) fill.
+- **The checkmark is the auto-next indicator.** Large and solid when the step needs the tap; small and dimmed when
+  it will advance on its own. A depleting progress ring was tried and rejected — a second progress indicator
+  alongside the fill, saying the same thing in a different shape.
+
+Known tradeoff the owner accepted: a manual step that is still on time now has no *positive* signal, only a bigger
+button. If it turns out to be unclear in real use, the cheapest fix is one line of `TAP WHEN DONE` for manual
+steps only, leaving auto steps silent.
+
+### Run 7 — Notes, skip and display toggles ✓ DONE (2026-09-07)
+
+- **Notes chip returns**, beside pause, and is always available — the point is to *capture* a thought mid-routine,
+  not only to read one. The step name stays a tap target too. The sheet is now editable, writes through to
+  SwiftData, and pushes the result into the run's frozen copy via `RoutineEngine.updateNotes`.
+- **Notes body set in the system font.** The receipt face was unreadable at paragraph length.
+- **`RoutineStep.autoShowNotes`** (default on, per-step) opens the note as the step starts. Toggled by an eye
+  button in the sheet's top-right corner, and also from the step editor.
+- **Step start/end times** moved to the top of the screen, behind a toggle; **NEXT** got a toggle too. Both live in
+  the Routine tab's "Timer" section.
+- **Skip** sits to the right of the checkmark, with a three-way prompt: skip it / move to the end / cancel. `ReceiptDialog` was generalised to take any
+  number of stacked actions.
+- **`TAP WHEN DONE`** now appears on manual steps only, closing the gap left when the auto-advance badge was
+  removed. Auto steps stay silent.
+
+78 tests. Data-shape notes: `RunStep` gained a hand-written `init(from:)` so old persisted runs still decode, and
+`StepResult.skipped` is Optional for the same reason.
+
+### Run 8 — Light mode, saturated palette, control polish ✓ DONE (2026-09-07)
+
+- **Light mode only**, set at the app level so system sheets and dialogs follow.
+- **Saturated palette.** The deep desaturated inks read as muted pastel. `FillTheme` is now green / ocean /
+  indigo / violet / ink in the FLIP timer's register, with brighter overtime amber and red to match. Renaming the
+  cases means a stored `forest`, `plum` or `graphite` selection falls back to the default (`green`);
+  `indigo` and `ocean` survive.
+- **Notes sheet:** close button removed (drag down or tap outside), and the auto-open control is a plainly
+  labelled switch at the foot rather than an unlabelled eye icon in the toolbar.
+- **Display options** (step times, next step) are now behind a chip in the running screen's top bar as well as in
+  the Routine tab.
+- **Complete button** is the single ghosted size for every step. Auto-next is a **dashed** border, manual is a
+  **solid** border.
+
+Tradeoff worth watching: with size and weight no longer varying, the required/optional distinction rests on
+border style alone, which is subtler than the old big-vs-small contrast.
+
+### Run 9 — Step-type badge ✓ DONE (2026-09-07)
+
+Dropped the `TAP WHEN DONE` / `OVERTIME · TAP WHEN DONE` line: the fill turning amber and then red already
+carries step-level overtime, so the words were restating what the colour showed. In its place, a small bordered
+`AUTO` / `MANUAL` capsule under the step name — a statement of what kind of step it is, not a status message, so
+the wording never changes mid-step. The checkmark's dashed/solid border still echoes it.
+
+### Run 10 — App icon ✓ DONE (2026-09-07)
+
+A dot-matrix sunrise — a sun ring with five rays over a full-width rule — built as a sibling to the FLIP timer's
+dot-matrix hourglass, in the same black-on-white dot construction. Light / Dark / Tinted variants, the dark one a
+straight inversion. Generated by `Tools/make_app_icon.py`, whose header records the shapes that failed first so
+they are not retried: an arc sitting on the horizon (reads as a tent), a filled disc (a stepped pyramid), a small
+outlined circle (a rounded square), and an angle-walked ring (lumpy on the diagonals).
+
+### Run 11 — Undo wake, brand timeline, editing moved ✓ DONE (2026-09-07)
+
+- **Undo wake up** under the Start Routine button, confirmed through `ReceiptDialog`. "I'm awake" is one tap and
+  starts the clock on the morning's whole scoreline, so a mis-tap needed a way back.
+- **Timeline recoloured** to the app's own palette: waking is scored on the same green / amber / red the timer
+  uses for pace, activation is indigo, and the routine leg takes whatever colour the user picked for the timer.
+- **The Routine tab is gone.** Step editing hangs off a pencil in the Run tab's top-left; what remains is a
+  **Settings** tab (timer appearance, morning goal, target, DEBUG tools), moved to the end of the tab bar.
+- **Idle step rows compacted** so a whole routine fits without scrolling.
+
+### Run 12 — Owner's real routine, and a persistence bug ✓ DONE (2026-09-07)
+
+- **The owner's actual 16-step routine** is now the seed (44 min 10 s). `RoutineStep.starterRoutineVersion`
+  gates it: bumping the version replaces the saved routine on next launch, which is how a new routine reaches a
+  device that already has one. It discards on-device edits, so only bump it when a reload has been asked for.
+- **Fixed: an ended routine came back from the dead.** The run lived in `UserDefaults`, whose writes `cfprefsd`
+  batches; a removal could still be pending when the process was killed, while the earlier save had committed.
+  `FileRunStore` now writes an atomic JSON file in Application Support. Its migration off `UserDefaults` needs its
+  own marker file — keying it on "the run file exists" reintroduced the bug, since ending a routine deletes that
+  file. Six tests cover it.
+
+### Run 13 — Brand-language sheets ✓ DONE (2026-09-07)
+
+The Display and Notes sheets were still stock `Form`/`Toggle` chrome. Both now use a new `ReceiptUI` kit —
+square-stroked buttons, a square switch, tracked-caps titles over a hard rule — on an opaque background (the
+translucent default let the timer's fill bleed through the note text).
+
+The notes sheet also changed behaviourally: reading and editing are separate modes, so a stray tap no longer
+opens the keyboard and no keystroke is saved until Save is pressed. Cancel with changes confirms first, the sheet
+cannot be swiped away mid-edit, and autocorrect is off (it mangles transliterated Arabic). Chrome follows the
+detent — at medium it is note text and the auto-open pill only; the step title and Edit appear at full height.
+
+### Run 14 — Routine end time ✓ DONE (2026-09-07)
+
+A third optional line on the running screen: `ROUTINE ENDS 5:20AM`, under the next-task preview, behind its own
+toggle in both the Display sheet and Settings. Labelled rather than a bare time so it cannot be misread as the
+current step's end, which is the line at the top.
+
+### Run 15 — Bottom bar ✓ DONE (2026-09-07)
+
+The running screen's top row — four chips plus a strip of step dots — ran edge to edge with a sixteen-step
+routine. All of it is now one floating bar at the bottom, in the shape of Arc's URL bar: pause left, `DONE AT
+5:20AM` centre, chevron right. Its top edge fills in proportion to the whole routine (no step ticks — tried in
+thought, judged noise). Tapping the centre shows elapsed time for a moment. The chevron raises `RunSheetView`: the
+step's note (opens the separate notes sheet), the run's numbers that were cut for density, the two display
+toggles, and End Routine. The routine-end toggle from Run 14 went away — the end time is now structural to the bar.
+
+### Run 16 — Friction pass ✓ DONE (2026-09-07)
+
+- **Bar progress is by plan position** (`routinePlanProgress`), not elapsed time: finishing a step early now
+  jumps the edge to the boundary instead of barely moving. Three engine tests.
+- **Run sheet:** started/done-at collapsed into one `5:12 – 5:57 AM` range; new **This step** section with
+  planned, average actual over recent runs, and the difference against plan (`RoutineStats.averageActual`).
+- **Bar centre is a toggle** — tap back to `DONE AT` at once, or it reverts after 3.5 s — and the two readings
+  roll vertically instead of the default crossfade.
+- **Adding a note is one tap:** "Add" opens the notes sheet fully with the keyboard up (`startEditing`). The
+  first cut presented the sheet with a Bool plus a separate editing flag, and the flag kept arriving as false —
+  the sheet's own `onDismiss` reset it during the hand-off from the run sheet. Now presented by item
+  (`NotesRequest`), which carries the flag and cannot be zeroed out underneath.
+- **The idle list edits in place:** tap a step to edit it, `+` on a connector to insert exactly there, `ADD STEP`
+  to append. Going through the pencil was a detour nobody remembered to take.
+- Step-times toggle removed from Settings; it lives on the run sheet.
+
+### Run 17 — Idle timer, sheet grouping, Live Activity (2026-09-07)
+
+- **Screen stays awake app-wide** during a run. The Run-tab-only version turned the idle timer back on when you
+  switched tabs, so reading Today mid-routine could let the phone sleep.
+- **Run sheet sections are boxed** — titled hairline groups, tighter rows — so grouping is drawn, not implied.
+- **Live Activity / Dynamic Island.** New `RISE_RoutineTimerWidgetExtension` target (`RISE_RoutineTimerWidget/`),
+  `RoutineActivityAttributes` shared with the app through a build-file exception set, and
+  `RoutineLiveActivityController` mirroring the engine on every event / on becoming active. Lock Screen banner:
+  progress edge, icon + title, AUTO / MANUAL / PAUSED badge, STEP n OF m, NEXT, the receipt-face countdown, DONE
+  time. Island: expanded (title, badge, countdown, progress, NEXT / DONE), compact (icon · countdown), minimal
+  (theme dot). Verified in the simulator on Home, expanded, and Lock Screen; the countdown is self-running from
+  the step dates, so the known limit is that a step *transition* needs the app awake — on a locked phone the
+  banner sits at 0:00 on the step that was current when the app last ran, and the local notifications carry the
+  boundary. A background audio session is the only way past that and was deliberately not added.
+- Fixes on the way: the expanded island's trailing countdown had `maxWidth: .infinity` and squeezed every title
+  to "DRINK WA…". The leading region now carries `priority: 1`; a `maxWidth: .infinity` on it was tried first
+  and blanked the trailing and bottom regions.
+
 ### Later (next)
-16. Live Activity / Dynamic Island.
 17. iCloud sync via SwiftData + CloudKit (decide **before** run 2: CloudKit requires all properties to have defaults and all relationships optional, which constrains the `RoutineSession` design).
 18. Multiple routines / profiles if "our routine" means more than one person.
 

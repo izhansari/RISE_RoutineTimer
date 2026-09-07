@@ -15,6 +15,7 @@ final class RoutineAlertCoordinator {
 
     private let engine: RoutineEngine
     private let alerts = RoutineAlerts()
+    private let liveActivity = RoutineLiveActivityController()
     private let recordSession: (SessionResult) -> Void
 
     init(engine: RoutineEngine, recordSession: @escaping (SessionResult) -> Void) {
@@ -23,11 +24,17 @@ final class RoutineAlertCoordinator {
         engine.onEvent = { [weak self] event in
             self?.handle(event)
         }
+        // A run restored at launch needs its activity back (or a stale one
+        // from a finished run taken down) before any event fires.
+        liveActivity.sync(with: engine)
     }
 
     func applicationDidBecomeActive() {
         engine.tick()
         RoutineNotificationManager.clearDelivered()
+        // The engine may have caught up across several steps while the app
+        // was suspended; the Lock Screen is only as current as this call.
+        liveActivity.sync(with: engine)
     }
 
     private var soundsEnabled: Bool {
@@ -39,6 +46,9 @@ final class RoutineAlertCoordinator {
     }
 
     private func handle(_ event: RoutineEngine.Event) {
+        // Every event changes something the Lock Screen shows, or ends it.
+        liveActivity.sync(with: engine)
+
         switch event {
         case .started:
             break
@@ -53,8 +63,6 @@ final class RoutineAlertCoordinator {
                 alerts.stepStarted(engine.steps[index], isLast: isLast, sounds: soundsEnabled, voice: voiceEnabled)
             }
             syncNotifications()
-        case .steppedBack:
-            alerts.steppedBack()
             syncNotifications()
         case .overtimeStarted(let index):
             if engine.steps.indices.contains(index) {

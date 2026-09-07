@@ -16,6 +16,26 @@ enum TimeFormatting {
         return formatter
     }()
 
+    private static let hourMinuteFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm"
+        return formatter
+    }()
+
+    /// "5:12 – 5:57 AM": one meridiem when both ends share it, both when a
+    /// range crosses noon or midnight.
+    static func clockRange(from start: Date, to end: Date) -> String {
+        let calendar = Calendar.current
+        let startAM = calendar.component(.hour, from: start) < 12
+        let endAM = calendar.component(.hour, from: end) < 12
+        let s = hourMinuteFormatter.string(from: start)
+        let e = hourMinuteFormatter.string(from: end)
+        if startAM == endAM {
+            return "\(s) – \(e) \(endAM ? "AM" : "PM")"
+        }
+        return "\(s) \(startAM ? "AM" : "PM") – \(e) \(endAM ? "AM" : "PM")"
+    }
+
     /// "4:05" style countdown text. Ignores sign; callers add "+" for overtime.
     nonisolated static func clockTime(from seconds: Int) -> String {
         let absoluteSeconds = abs(seconds)

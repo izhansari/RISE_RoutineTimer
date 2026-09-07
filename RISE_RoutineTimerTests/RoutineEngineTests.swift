@@ -197,26 +197,115 @@ final class RoutineEngineTests: XCTestCase {
         XCTAssertEqual(engine.currentIndex, 1)
     }
 
-    // MARK: - Undo
+    // MARK: - Plan progress
 
-    func testUndoCreditsTimeBackToThePreviousStep() {
-        let (engine, log) = startedEngine()
-        engine.completeCurrentStep(at: at(40))
-        engine.tick(at: at(55))
-        engine.undoLastStep(at: at(55))
+    // Steps: Water 120, Stretch 300, Wash 600 (manual), Plan 300 → 1320 s.
 
-        XCTAssertEqual(engine.currentIndex, 0)
-        XCTAssertEqual(engine.stepElapsed, 55, accuracy: 0.0001)
-        XCTAssertEqual(engine.results.count, 0)
-        XCTAssertEqual(log.events.last, .steppedBack(index: 0))
+    func testPlanProgressJumpsToTheBoundaryWhenAStepFinishesEarly() {
+        let (engine, _) = startedEngine()
+        engine.tick(at: at(30))
+        XCTAssertEqual(engine.routinePlanProgress, 30.0 / 1320, accuracy: 0.0001)
+
+        engine.completeCurrentStep(at: at(30))
+        // The whole 120 s of Water now counts, not the 30 s it actually took.
+        XCTAssertEqual(engine.routinePlanProgress, 120.0 / 1320, accuracy: 0.0001)
     }
 
-    func testUndoOnFirstStepDoesNothing() {
+    func testPlanProgressHoldsAtTheBoundaryInOvertime() {
         let (engine, _) = startedEngine()
-        engine.tick(at: at(5))
-        engine.undoLastStep(at: at(5))
+        engine.completeCurrentStep(at: at(10))
+        engine.completeCurrentStep(at: at(20))
+        engine.tick(at: at(20 + 700))   // Wash is 600 s; 100 s over
+        XCTAssertEqual(engine.routinePlanProgress, (120.0 + 300 + 600) / 1320, accuracy: 0.0001)
+    }
+
+    func testPlanProgressIsCompleteAtTheEnd() {
+        let (engine, _) = startedEngine()
+        for _ in 0..<4 { engine.completeCurrentStep(at: at(10)) }
+        XCTAssertEqual(engine.routinePlanProgress, 1, accuracy: 0.0001)
+    }
+
+    // MARK: - Skip and defer
+
+    func testSkipRecordsTheStepAsSkippedAndMovesOn() {
+        let (engine, log) = startedEngine()
+        engine.tick(at: at(30))
+        engine.skipCurrentStep(at: at(30))
+
+        XCTAssertEqual(engine.currentIndex, 1)
+        XCTAssertEqual(engine.results.count, 1)
+        XCTAssertTrue(engine.results[0].wasSkipped)
+        // The time actually spent still counts, so the session total is honest.
+        XCTAssertEqual(engine.results[0].actualSeconds, 30)
+        XCTAssertEqual(log.events.last, .stepStarted(index: 1, auto: false))
+    }
+
+    func testSkippingTheLastStepFinishesTheRoutine() {
+        let (engine, _) = startedEngine()
+        engine.completeCurrentStep(at: at(10))
+        engine.completeCurrentStep(at: at(20))
+        engine.completeCurrentStep(at: at(30))
+        XCTAssertEqual(engine.currentIndex, 3)
+
+        engine.skipCurrentStep(at: at(40))
+        XCTAssertTrue(engine.isComplete)
+        XCTAssertTrue(engine.results.last?.wasSkipped == true)
+    }
+
+    func testSkippedStepCountsAsAheadOfPlan() {
+        let (engine, _) = startedEngine()
+        engine.skipCurrentStep(at: at(0))
+        // A 120 s step skipped instantly is 120 s ahead.
+        XCTAssertEqual(engine.scheduleDeltaSeconds, -120)
+    }
+
+    func testMoveToEndReordersAndStartsTheFollowingStep() {
+        let (engine, log) = startedEngine()
+        engine.tick(at: at(20))
+        engine.moveCurrentStepToEnd(at: at(20))
+
         XCTAssertEqual(engine.currentIndex, 0)
-        XCTAssertEqual(engine.stepElapsed, 5, accuracy: 0.0001)
+        XCTAssertEqual(engine.currentStep?.title, "Stretch")
+        XCTAssertEqual(engine.steps.map(\.title), ["Stretch", "Wash", "Plan", "Water"])
+        // Deferring is not doing: nothing is recorded for the moved step.
+        XCTAssertTrue(engine.results.isEmpty)
+        XCTAssertEqual(engine.stepElapsed, 0, accuracy: 0.0001)
+        XCTAssertEqual(log.events.last, .stepStarted(index: 0, auto: false))
+    }
+
+    func testMoveToEndKeepsThePlannedTotal() {
+        let (engine, _) = startedEngine()
+        let planned = engine.plannedTotalSeconds
+        engine.moveCurrentStepToEnd(at: at(20))
+        XCTAssertEqual(engine.plannedTotalSeconds, planned)
+    }
+
+    func testMoveToEndOnTheLastStepDoesNothing() {
+        let (engine, _) = startedEngine()
+        engine.completeCurrentStep(at: at(10))
+        engine.completeCurrentStep(at: at(20))
+        engine.completeCurrentStep(at: at(30))
+        let order = engine.steps.map(\.title)
+
+        engine.moveCurrentStepToEnd(at: at(40))
+        XCTAssertEqual(engine.currentIndex, 3)
+        XCTAssertEqual(engine.steps.map(\.title), order)
+    }
+
+    // MARK: - Editing notes mid-run
+
+    func testUpdateNotesWritesIntoTheFrozenRun() {
+        let (engine, _) = startedEngine()
+        let id = engine.currentStep!.id
+        engine.updateNotes("Remember the vitamins", forStepID: id)
+        XCTAssertEqual(engine.currentStep?.notes, "Remember the vitamins")
+        XCTAssertTrue(engine.currentStep?.hasNotes == true)
+    }
+
+    func testUpdateNotesIgnoresAnUnknownStep() {
+        let (engine, _) = startedEngine()
+        engine.updateNotes("nope", forStepID: UUID())
+        XCTAssertEqual(engine.currentStep?.notes, "")
     }
 
     // MARK: - Abandon and reset

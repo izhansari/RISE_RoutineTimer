@@ -2,7 +2,11 @@
 //  RoutineListView.swift
 //  RISE_RoutineTimer
 //
-//  The "Routine" tab: the step list, the finish-by target, and housekeeping.
+//  The step list editor. Presented as a sheet from the Run tab's Edit button
+//  rather than living in a tab of its own: the Run tab already shows the
+//  steps, and editing them from somewhere else was a needless round trip.
+//
+//  Settings that are not steps live in `SettingsView`.
 //
 
 import SwiftData
@@ -10,27 +14,50 @@ import SwiftUI
 
 struct RoutineListView: View {
     @Environment(\.modelContext) private var modelContext
-    @AppStorage(TargetSchedule.targetKey) private var targetMinutes = TargetSchedule.none
-    @AppStorage(TargetSchedule.reminderKey) private var reminderEnabled = false
-    @AppStorage(MorningSettings.targetWakeKey) private var targetWakeMinutes = MorningSettings.defaultTargetWakeMinutes
-    @AppStorage(MorningSettings.snoozeBudgetKey) private var snoozeBudget = MorningSettings.defaultSnoozeBudget
-    @AppStorage(MorningSettings.activationBudgetKey) private var activationBudget = MorningSettings.defaultActivationBudget
+    @Environment(\.dismiss) private var dismiss
+
     @State private var path = NavigationPath()
     @State private var confirmingRestore = false
 
     let steps: [RoutineStep]
 
     private var plannedSeconds: Int { steps.reduce(0) { $0 + $1.durationSeconds } }
-    private var schedule: TargetSchedule { TargetSchedule(targetMinutesAfterMidnight: targetMinutes) }
 
     var body: some View {
         NavigationStack(path: $path) {
             List {
-                stepsSection
-                wakeGoalSection
-                targetSection
+                Section {
+                    ForEach(steps) { step in
+                        NavigationLink(value: step) {
+                            RoutineStepRow(step: step)
+                        }
+                        .swipeActions(edge: .leading) {
+                            Button { duplicate(step) } label: {
+                                Label("Duplicate", systemImage: "plus.square.on.square")
+                            }
+                            .tint(.blue)
+                        }
+                    }
+                    .onDelete(perform: deleteSteps)
+                    .onMove(perform: moveSteps)
+
+                    Button(action: addStep) {
+                        Label("Add Step", systemImage: "plus")
+                    }
+                } footer: {
+                    if plannedSeconds > 0 {
+                        Text("Total: \(TimeFormatting.durationText(from: plannedSeconds))")
+                    }
+                }
+
+                Section {
+                    Button(role: .destructive) { confirmingRestore = true } label: {
+                        Label("Restore Starter Routine", systemImage: "arrow.counterclockwise")
+                    }
+                }
             }
-            .navigationTitle("Routine")
+            .navigationTitle("Edit Routine")
+            .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: RoutineStep.self) { step in
                 StepEditorView(step: step)
             }
@@ -38,34 +65,8 @@ struct RoutineListView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     EditButton()
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button(action: addStep) { Label("Add Step", systemImage: "plus") }
-                        Divider()
-                        Button { confirmingRestore = true } label: {
-                            Label("Restore Starter Routine", systemImage: "arrow.counterclockwise")
-                        }
-                        #if DEBUG
-                        Divider()
-                        Button {
-                            DebugSeed.populate(
-                                context: modelContext,
-                                steps: steps,
-                                settings: MorningSettings(targetWakeMinutes: targetWakeMinutes)
-                            )
-                        } label: {
-                            Label("Seed Sample History", systemImage: "wand.and.stars")
-                        }
-                        Button(role: .destructive) {
-                            DebugSeed.clear(context: modelContext)
-                        } label: {
-                            Label("Clear All History", systemImage: "trash")
-                        }
-                        #endif
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                    .accessibilityLabel("Routine actions")
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
                 }
             }
             .confirmationDialog("Replace your routine with the starter one?", isPresented: $confirmingRestore, titleVisibility: .visible) {
@@ -74,118 +75,10 @@ struct RoutineListView: View {
             } message: {
                 Text("Your current steps will be deleted. History is kept.")
             }
-            .onChange(of: targetMinutes) { _, _ in syncReminder() }
-            .onChange(of: reminderEnabled) { _, _ in syncReminder() }
-            .onChange(of: plannedSeconds) { _, _ in syncReminder() }
-        }
-    }
-
-    // MARK: - Sections
-
-    private var stepsSection: some View {
-        Section {
-            ForEach(steps) { step in
-                NavigationLink(value: step) {
-                    RoutineStepRow(step: step)
-                }
-                .swipeActions(edge: .leading) {
-                    Button { duplicate(step) } label: {
-                        Label("Duplicate", systemImage: "plus.square.on.square")
-                    }
-                    .tint(.blue)
-                }
-            }
-            .onDelete(perform: deleteSteps)
-            .onMove(perform: moveSteps)
-
-            Button(action: addStep) {
-                Label("Add Step", systemImage: "plus")
-            }
-        } footer: {
-            if plannedSeconds > 0 {
-                Text("Total: \(TimeFormatting.durationText(from: plannedSeconds))")
-            }
-        }
-    }
-
-    /// The wake goal and the weekly allowances the Today tab scores against.
-    private var wakeGoalSection: some View {
-        Section {
-            DatePicker("Wake up by", selection: wakeGoalBinding, displayedComponents: .hourAndMinute)
-
-            Stepper(value: $snoozeBudget, in: 0...600, step: 15) {
-                LabeledContent("Snooze budget", value: "\(snoozeBudget) min / week")
-            }
-
-            Stepper(value: $activationBudget, in: 0...600, step: 15) {
-                LabeledContent("Activation budget", value: "\(activationBudget) min / week")
-            }
-        } header: {
-            Text("Morning goal")
-        } footer: {
-            Text("Snooze is time past your wake goal. Activation is time between waking and starting. Each week's overruns are drawn against these budgets on the Today tab.")
-        }
-    }
-
-    private var wakeGoalBinding: Binding<Date> {
-        Binding {
-            Calendar.current.startOfDay(for: Date())
-                .addingTimeInterval(TimeInterval(targetWakeMinutes * 60))
-        } set: { date in
-            let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
-            targetWakeMinutes = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
-        }
-    }
-
-    private var targetSection: some View {
-        Section {
-            Toggle("Finish by a set time", isOn: targetEnabledBinding)
-            if schedule.isSet {
-                DatePicker("Finish by", selection: targetDateBinding, displayedComponents: .hourAndMinute)
-                Toggle("Remind me when it's time to start", isOn: $reminderEnabled)
-            }
-        } header: {
-            Text("Target")
-        } footer: {
-            if let startBy = schedule.startByDate(on: Date(), plannedSeconds: plannedSeconds) {
-                Text("Start by \(TimeFormatting.shortClockTime(from: startBy)) to finish on time with the current \(TimeFormatting.durationText(from: plannedSeconds)) plan.")
-            } else {
-                Text("Set the time you need to be done, and RISE will tell you when to start.")
-            }
-        }
-    }
-
-    // MARK: - Bindings
-
-    private var targetEnabledBinding: Binding<Bool> {
-        Binding {
-            schedule.isSet
-        } set: { enabled in
-            targetMinutes = enabled ? 7 * 60 + 30 : TargetSchedule.none
-        }
-    }
-
-    private var targetDateBinding: Binding<Date> {
-        Binding {
-            schedule.targetDate(on: Date()) ?? Date()
-        } set: { date in
-            let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
-            targetMinutes = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
         }
     }
 
     // MARK: - Actions
-
-    private func syncReminder() {
-        guard reminderEnabled, let target = schedule.targetDate(on: Date()) else {
-            RoutineNotificationManager.scheduleDailyReminder(at: nil, targetText: "")
-            return
-        }
-        RoutineNotificationManager.scheduleDailyReminder(
-            at: schedule.startByComponents(plannedSeconds: plannedSeconds),
-            targetText: TimeFormatting.shortClockTime(from: target)
-        )
-    }
 
     private func addStep() {
         let step = RoutineStep(
@@ -208,6 +101,7 @@ struct RoutineListView: View {
             durationSeconds: source.durationSeconds,
             autoNext: source.autoNext,
             notes: source.notes,
+            autoShowNotes: source.autoShowNotes,
             sortOrder: nextSortOrder
         )
         modelContext.insert(copy)
@@ -284,23 +178,23 @@ private struct RoutineStepRow: View {
         HStack(spacing: 12) {
             if !step.icon.isEmpty {
                 Text(step.icon)
-                    .font(.system(size: 26))
-                    .frame(width: 36)
+                    .font(.system(size: 24))
+                    .frame(width: 32)
             }
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(step.title)
-                    .font(analogFont(22))
+                    .font(analogFont(19))
 
                 HStack(spacing: 10) {
                     Text(TimeFormatting.durationText(from: step.durationSeconds))
-                        .font(analogFont(16))
+                        .font(analogFont(14))
 
                     if !step.autoNext {
                         Text("MANUAL")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: 9, weight: .semibold))
                             .tracking(0.8)
-                            .padding(.horizontal, 7)
+                            .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Color.secondary.opacity(0.1), in: Capsule())
                     }
@@ -308,6 +202,6 @@ private struct RoutineStepRow: View {
                 .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 4)
     }
 }

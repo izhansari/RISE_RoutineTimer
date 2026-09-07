@@ -2,8 +2,19 @@
 //  ActiveRoutineView.swift
 //  RISE_RoutineTimer
 //
-//  The running-timer screen. Split out of RoutineTimerView, which had it as a
-//  600-line blob of magic height fractions and hand-placed `.position()` calls.
+//  The running-timer screen.
+//
+//  The design is "silent until it matters": on a good morning the screen is
+//  the step icon, its name, a rule, and the countdown — nothing else. It only
+//  speaks when the *routine* is at risk, and step-level trouble is carried by
+//  the colour of the fill rather than by a label.
+//
+//  Chrome lives in one place: a floating bar at the bottom, in the shape of
+//  Arc's URL bar. Pause on the left, the projected finish in the middle, a
+//  chevron on the right that raises the run sheet. The bar's top edge fills
+//  in proportion to the whole routine. That replaced a row of four chips and
+//  a strip of step dots across the top, which with sixteen steps ran edge to
+//  edge and left nothing for the eye to rest on.
 //
 //  Structure, and why it is this way:
 //
@@ -11,15 +22,18 @@
 //    fill line. Every *control* lives in the sibling overlay instead, because
 //    the fill builds its content twice and would otherwise give us two of
 //    each button stacked on top of each other.
-//  * Controls are white chips, which is what lets them sit outside the
-//    inversion: a white circle reads against both the white page and the
-//    coloured fill without any per-layer colour maths.
-//  * The bottom cluster is a real centred HStack — undo, complete, notes —
-//    with hidden placeholders holding the slots when undo or notes are
-//    unavailable, so the big button never shifts sideways mid-routine.
-//  * The old screen put four different numbers in the bottom-left corner at
-//    four different opacities. They are now three aligned micro-stats, and
-//    the ahead/behind signal is carried by the colour of the whole screen.
+//  * The bar and the chips are opaque white and float above the fill. The
+//    bar has to be: it sits at the bottom, which is inside the coloured
+//    region for most of a step, and a grey-on-black progress edge would be
+//    fighting the indigo behind it otherwise.
+//  * The step name opens the notes sheet. It is drawn as plain text inside
+//    the fill (so it still inverts) and the tap target is placed over it in
+//    the overlay, using an anchor the content publishes.
+//  * The checkmark's border is the auto-next indicator, alongside the
+//    AUTO / MANUAL badge under the step name.
+//
+//  Two progress indicators, on purpose: the rising fill is *this step*; the
+//  bar's edge is *the whole routine*. They measure different things.
 //
 //  Everything here is snapped, not animated, exactly like the FLIP timer:
 //  see the note in InvertingFillView about per-tick invalidation.
@@ -27,43 +41,138 @@
 
 import SwiftUI
 
+/// Which optional lines the running screen shows. Both default to on.
+nonisolated enum ActiveScreenSettings {
+    static let showStepTimesKey = "activeShowStepTimes"
+    static let showNextStepKey = "activeShowNextStep"
+}
+
+/// Where the step name ended up, so the notes tap target can sit on top of it.
+private struct TitleBoundsKey: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = value ?? nextValue()
+    }
+}
+
 struct ActiveRoutineView: View {
     let engine: RoutineEngine
     let schedule: TargetSchedule
-    let onShowNotes: () -> Void
+    let theme: FillTheme
+    let onShowNotes: (_ editing: Bool) -> Void
+    /// Called once the user has confirmed; this view owns the confirmation.
     let onEnd: () -> Void
 
-    private let checkDiameter: CGFloat = 128
-    private let chipDiameter: CGFloat = 52
-    private let topBarHeight: CGFloat = 44
-    /// Fixed height of the "NEXT — ..." zone under the control cluster.
-    private let nextZoneHeight: CGFloat = 58
+    @State private var confirmingEnd = false
+    @State private var confirmingSkip = false
+    @State private var showingRunSheet = false
+    /// The bar's centre flips from "done at" to elapsed for a moment on tap.
+    @State private var showingElapsed = false
+    @State private var elapsedFlash: Task<Void, Never>?
 
-    /// Both layers ignore the safe area and re-apply it through these, so the
-    /// reserved slot in the type layer and the real button in the control
-    /// layer are positioned by identical arithmetic. Getting this wrong is how
-    /// the checkmark ended up sitting on top of the pace row.
-    private func bottomInset(_ insets: EdgeInsets) -> CGFloat { max(insets.bottom, 16) + 8 }
+    @AppStorage(ActiveScreenSettings.showStepTimesKey) private var showStepTimes = true
+    @AppStorage(ActiveScreenSettings.showNextStepKey) private var showNextStep = true
 
-    private var pace: RoutinePace { RoutinePace(deltaSeconds: engine.scheduleDeltaSeconds) }
+    /// The slot the primary button occupies. Fixed, so a change of step never
+    /// moves the type above it.
+    private let buttonSlotHeight: CGFloat = 128
+    private let checkDiameter: CGFloat = 104
+    private let barHeight: CGFloat = 54
+    private let barGap: CGFloat = 14
+    private let progressEdgeHeight: CGFloat = 3
+
+    /// Height of the "NEXT — ..." zone under the button; collapses to nothing
+    /// when the setting is off. Both layers read this same value, so the
+    /// button and its reserved slot stay aligned either way.
+    private var nextZoneHeight: CGFloat { showNextStep ? 58 : 0 }
+
+    /// Both layers ignore the safe area and re-apply it through this, so the
+    /// reserved slots in the type layer and the real controls in the control
+    /// layer are positioned by identical arithmetic.
+    private func bottomInset(_ insets: EdgeInsets) -> CGFloat { max(insets.bottom, 16) + 4 }
+
+    private var pace: StepPace { StepPace(overtimeSeconds: engine.overtimeSeconds) }
+    private var hasNotes: Bool { engine.currentStep?.hasNotes == true }
 
     var body: some View {
-        // The outer GeometryReader is the only thing that still sees the real
-        // safe area, since the ZStack below deliberately ignores it.
         GeometryReader { geo in
             let insets = geo.safeAreaInsets
 
             ZStack {
-                InvertingFillView(
-                    fillColor: pace.fillColor,
-                    fillFraction: engine.currentStepFillProgress
-                ) { textColor in
-                    content(textColor: textColor, insets: insets)
-                }
+                ZStack {
+                    InvertingFillView(
+                        fillColor: pace.fillColor(theme: theme),
+                        fillFraction: engine.currentStepFillProgress
+                    ) { textColor in
+                        content(textColor: textColor, insets: insets)
+                    }
 
-                controls(insets: insets)
+                    controls(insets: insets)
+                }
+                .blur(radius: engine.isPaused ? 18 : 0)
+                .scaleEffect(engine.isPaused ? 1.06 : 1)
+
+                if engine.isPaused {
+                    PauseOverlay(
+                        engine: engine,
+                        onResume: { engine.resume() },
+                        onEnd: { confirmingEnd = true }
+                    )
+                    .transition(.opacity)
+                }
             }
             .ignoresSafeArea()
+            .animation(.easeOut(duration: 0.22), value: engine.isPaused)
+            // The step name is the notes affordance. The tap target has to be
+            // out here, not in the content closure, or there would be two.
+            .overlayPreferenceValue(TitleBoundsKey.self) { anchor in
+                if let anchor, hasNotes, !engine.isPaused {
+                    GeometryReader { proxy in
+                        let frame = proxy[anchor]
+                        Button { onShowNotes(false) } label: {
+                            Color.clear.contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .frame(width: frame.width, height: frame.height)
+                        .position(x: frame.midX, y: frame.midY)
+                        .accessibilityLabel("Show notes for \(engine.currentStep?.title ?? "this step")")
+                    }
+                    .ignoresSafeArea()
+                }
+            }
+        }
+        .sheet(isPresented: $showingRunSheet) {
+            RunSheetView(
+                engine: engine,
+                schedule: schedule,
+                onShowNotes: { editing in afterSheetDismisses { onShowNotes(editing) } },
+                onEnd: { afterSheetDismisses { confirmingEnd = true } }
+            )
+        }
+        .receiptDialog(isPresented: $confirmingSkip, title: "Skip this step?") {
+            ReceiptDialogAction.destructive("Skip it") { engine.skipCurrentStep() }
+            if !engine.isOnLastStep {
+                ReceiptDialogAction.quiet("Move to the end") { engine.moveCurrentStepToEnd() }
+            }
+            ReceiptDialogAction.quiet("Cancel") {}
+        }
+        .receiptDialog(
+            isPresented: $confirmingEnd,
+            title: "End routine?",
+            message: "This morning will be saved as ended early, and you'll start from the first step next time.",
+            confirmTitle: "End routine",
+            cancelTitle: "Keep going",
+            onConfirm: onEnd
+        )
+    }
+
+    /// The run sheet dismisses itself before handing off, but the next
+    /// presentation still needs the dismissal animation to finish first, or
+    /// SwiftUI drops one of them.
+    private func afterSheetDismisses(_ action: @escaping () -> Void) {
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            action()
         }
     }
 
@@ -71,24 +180,34 @@ struct ActiveRoutineView: View {
 
     private func content(textColor: Color, insets: EdgeInsets) -> some View {
         VStack(spacing: 0) {
+            if showStepTimes {
+                Text(stepTimeRangeText)
+                    .font(analogFont(15))
+                    .tracking(1.5)
+                    .foregroundStyle(textColor.opacity(0.45))
+                    .padding(.top, 14)
+            }
+
             Spacer(minLength: 8)
 
             hero(textColor: textColor)
 
             Spacer(minLength: 8)
 
-            paceRow(textColor: textColor)
-                .padding(.bottom, 24)
-
-            // The slot the control cluster occupies in the overlay. Reserved
-            // here so the type above can never collide with it.
             Color.clear
-                .frame(height: checkDiameter)
+                .frame(height: buttonSlotHeight)
 
-            nextLabel(textColor: textColor)
-                .frame(height: nextZoneHeight)
+            if showNextStep {
+                nextLabel(textColor: textColor)
+                    .frame(height: nextZoneHeight)
+            }
+
+            // The floating bar's slot, reserved so the type above never
+            // collides with it.
+            Color.clear
+                .frame(height: barGap + barHeight)
         }
-        .padding(.top, insets.top + topBarHeight)
+        .padding(.top, insets.top + 8)
         .padding(.bottom, bottomInset(insets))
         .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -109,12 +228,32 @@ struct ActiveRoutineView: View {
                 .foregroundStyle(textColor)
                 .lineLimit(2)
                 .minimumScaleFactor(0.5)
+                .anchorPreference(key: TitleBoundsKey.self, value: .bounds) { $0 }
+
+            // What kind of step this is, stated once and permanently. It is
+            // not a status message — overtime is the fill colour's job — so
+            // the wording never changes while the step runs.
+            Text(engine.currentStep?.autoNext == false ? "MANUAL" : "AUTO")
+                .font(.system(size: 9, weight: .semibold))
+                .tracking(2)
+                .foregroundStyle(textColor.opacity(0.6))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .overlay {
+                    Capsule().strokeBorder(textColor.opacity(0.35), lineWidth: 1)
+                }
+                .padding(.top, 12)
+                .accessibilityLabel(
+                    engine.currentStep?.autoNext == false
+                        ? "Manual step, waits for you"
+                        : "Automatic step, advances on its own"
+                )
 
             // The FLIP rule: a hard bar between the label and the digits.
             Rectangle()
                 .fill(textColor)
                 .frame(width: 132, height: 3)
-                .padding(.vertical, 18)
+                .padding(.vertical, 16)
 
             Text(displayTime)
                 .font(digitFont(86))
@@ -125,38 +264,17 @@ struct ActiveRoutineView: View {
                 .minimumScaleFactor(0.4)
                 .accessibilityLabel(engine.isOvertime ? "\(displayTime) over" : "\(displayTime) remaining")
 
-            Text(stepTimeRangeText)
-                .font(analogFont(17))
-                .tracking(1.5)
-                .foregroundStyle(textColor.opacity(0.55))
-                .padding(.top, 10)
+            // Said only when the routine as a whole is at risk. Nothing is
+            // said about *this step* running over: the fill going amber and
+            // then red already says it, and saying it twice was noise.
+            if let alert = alertText {
+                Text(alert)
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(2)
+                    .foregroundStyle(textColor.opacity(0.95))
+                    .padding(.top, 14)
+            }
         }
-    }
-
-    /// Three aligned micro-stats replacing the old corner pile of numbers.
-    private func paceRow(textColor: Color) -> some View {
-        HStack(alignment: .top, spacing: 0) {
-            microStat("PACE", pace.label(deltaSeconds: engine.scheduleDeltaSeconds), textColor)
-            microStat("DONE", TimeFormatting.shortClockTime(from: engine.projectedEndDate).uppercased(), textColor)
-            microStat("SPARE", spareValue, textColor)
-        }
-    }
-
-    private func microStat(_ label: String, _ value: String, _ textColor: Color) -> some View {
-        VStack(spacing: 5) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .tracking(2)
-                .foregroundStyle(textColor.opacity(0.4))
-            Text(value)
-                .font(analogFont(15))
-                .tracking(1)
-                .foregroundStyle(textColor.opacity(0.85))
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-        }
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .combine)
     }
 
     private func nextLabel(textColor: Color) -> some View {
@@ -181,92 +299,158 @@ struct ActiveRoutineView: View {
 
     private func controls(insets: EdgeInsets) -> some View {
         VStack(spacing: 0) {
-            topBar
-                .frame(height: topBarHeight)
-                .padding(.top, insets.top + 4)
-
             Spacer(minLength: 0)
 
-            // Mirrors the reserved slot in `content` exactly.
-            bottomCluster
-                .frame(height: checkDiameter)
-                .padding(.bottom, nextZoneHeight + bottomInset(insets))
+            // Mirrors the reserved slots in `content` exactly. The placeholder
+            // opposite the skip chip keeps the checkmark on the centre line.
+            HStack(spacing: 20) {
+                Color.clear.frame(width: 46, height: 46)
+                completeButton
+                chipButton("forward.end", diameter: 46, label: "Skip or defer this step") {
+                    confirmingSkip = true
+                }
+            }
+            .frame(height: buttonSlotHeight)
+
+            Color.clear.frame(height: nextZoneHeight)
+
+            bottomBar
+                .frame(height: barHeight)
+                .padding(.top, barGap)
         }
         .padding(.horizontal, 20)
+        .padding(.bottom, bottomInset(insets))
     }
 
-    private var topBar: some View {
-        HStack {
-            chipButton("xmark", diameter: 38, label: "End routine", action: onEnd)
+    /// One quiet button at one size, whatever the step. The *border* carries
+    /// the auto-next signal: dashed when the step will advance on its own,
+    /// solid when it is waiting on this tap.
+    private var completeButton: some View {
+        let isRequired = engine.currentStep?.autoNext == false
 
-            Spacer()
+        return Button {
+            engine.completeCurrentStep()
+        } label: {
+            Image(systemName: "checkmark")
+                .font(.system(size: checkDiameter * 0.34, weight: .regular))
+                .foregroundStyle(Color(hex: 0x111111).opacity(0.55))
+                .frame(width: checkDiameter, height: checkDiameter)
+                .background(Circle().fill(Color.white))
+                .overlay {
+                    Circle().strokeBorder(
+                        Color.black.opacity(isRequired ? 0.4 : 0.28),
+                        style: isRequired
+                            ? StrokeStyle(lineWidth: 2)
+                            : StrokeStyle(lineWidth: 2, dash: [4, 5])
+                    )
+                }
+                .shadow(color: .black.opacity(0.1), radius: 10, y: 3)
+        }
+        .buttonStyle(PressScaleStyle())
+        .accessibilityLabel(isRequired ? "Complete step" : "Finish this step early")
+        .accessibilityHint(isRequired ? "This step waits for you" : "This step advances on its own")
+    }
 
-            HStack(spacing: 7) {
-                ForEach(engine.steps.indices, id: \.self) { i in
-                    Capsule()
-                        .fill(dotColor(for: i))
-                        .frame(width: i == engine.currentIndex ? 24 : 8, height: 5)
+    // MARK: - Bottom bar
+
+    /// Arc's URL bar, repurposed: the one control that needs to be a single
+    /// tap (pause), the one number worth keeping in view (when you'll be
+    /// done), and a chevron for everything else. The top edge is the whole
+    /// routine's progress.
+    private var bottomBar: some View {
+        VStack(spacing: 0) {
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(Color.black.opacity(0.1))
+                    Rectangle()
+                        .fill(Color(hex: 0x111111))
+                        .frame(width: geo.size.width * engine.routinePlanProgress)
                 }
             }
-            .animation(.easeInOut(duration: 0.3), value: engine.currentIndex)
-            .accessibilityLabel("Step \(engine.currentIndex + 1) of \(engine.steps.count)")
+            .frame(height: progressEdgeHeight)
+            .accessibilityLabel("Routine \(Int(engine.routinePlanProgress * 100)) percent through")
 
-            Spacer()
+            HStack(spacing: 0) {
+                barButton("pause.fill", label: "Pause routine") { engine.pause() }
 
-            chipButton("pause.fill", diameter: 38, label: "Pause routine") { engine.pause() }
-        }
-    }
+                Spacer(minLength: 0)
 
-    /// The dots sit above the fill line for almost the whole step, so they are
-    /// drawn dark and only flip once the fill has actually reached them.
-    private func dotColor(for index: Int) -> Color {
-        let onFill = engine.currentStepFillProgress > 0.94
-        let base = onFill ? Color.white : Color.black
-        if index < engine.currentIndex { return base.opacity(0.45) }
-        if index == engine.currentIndex { return base.opacity(0.9) }
-        return base.opacity(0.18)
-    }
-
-    private var bottomCluster: some View {
-        HStack(spacing: 20) {
-            // Placeholders keep the checkmark centred when a side action is
-            // unavailable, so the main target never moves under the thumb.
-            Group {
-                if engine.currentIndex > 0 {
-                    chipButton("arrow.uturn.backward", diameter: chipDiameter, label: "Go back to previous step") {
-                        engine.undoLastStep()
+                Button(action: toggleElapsed) {
+                    ZStack {
+                        if showingElapsed {
+                            barLabel("\(TimeFormatting.clockTime(from: engine.activeElapsedSeconds)) ELAPSED")
+                                .transition(rollUp)
+                        } else {
+                            barLabel("DONE AT \(TimeFormatting.shortClockTime(from: engine.projectedEndDate).uppercased())")
+                                .transition(rollUp)
+                        }
                     }
-                } else {
-                    placeholderChip
+                    .frame(maxWidth: .infinity)
+                    .clipped()
+                    .contentShape(Rectangle())
                 }
-            }
+                .buttonStyle(.plain)
+                .animation(.snappy(duration: 0.28), value: showingElapsed)
+                .accessibilityLabel(showingElapsed ? "Elapsed" : "Projected finish")
+                .accessibilityHint("Tap to switch")
 
-            Button {
-                engine.completeCurrentStep()
-            } label: {
-                Image(systemName: "checkmark")
-                    .font(.system(size: checkDiameter * 0.4, weight: .medium))
-                    .foregroundStyle(Color(hex: 0x111111))
-                    .frame(width: checkDiameter, height: checkDiameter)
-                    .background(Circle().fill(Color.white))
-                    .overlay(Circle().strokeBorder(Color.black.opacity(0.08), lineWidth: 1))
-                    .shadow(color: .black.opacity(0.16), radius: 18, y: 6)
-            }
-            .buttonStyle(PressScaleStyle())
-            .accessibilityLabel("Complete step")
+                Spacer(minLength: 0)
 
-            Group {
-                if engine.currentStep?.hasNotes == true {
-                    chipButton("note.text", diameter: chipDiameter, label: "Show notes", action: onShowNotes)
-                } else {
-                    placeholderChip
-                }
+                barButton("chevron.up", label: "Run details") { showingRunSheet = true }
             }
+            .frame(height: barHeight - progressEdgeHeight)
         }
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.black.opacity(0.08), lineWidth: 1))
+        .shadow(color: .black.opacity(0.14), radius: 14, y: 5)
     }
 
-    private var placeholderChip: some View {
-        Color.clear.frame(width: chipDiameter, height: chipDiameter)
+    private func barButton(_ systemName: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color(hex: 0x111111).opacity(0.75))
+                .frame(width: 52, height: barHeight - progressEdgeHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    private func barLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .semibold))
+            .tracking(1.8)
+            .monospacedDigit()
+            .foregroundStyle(Color(hex: 0x111111).opacity(0.8))
+            .lineLimit(1)
+    }
+
+    /// Old reading rolls up and out, new one rolls up and in — a ticker, so
+    /// the swap reads as one thing turning over rather than two things
+    /// crossfading on top of each other.
+    private var rollUp: AnyTransition {
+        .asymmetric(
+            insertion: .move(edge: .bottom).combined(with: .opacity),
+            removal: .move(edge: .top).combined(with: .opacity)
+        )
+    }
+
+    /// Swaps the bar's centre to elapsed time. Tapping again swaps it back
+    /// straight away; left alone it reverts after a few seconds.
+    private func toggleElapsed() {
+        elapsedFlash?.cancel()
+        if showingElapsed {
+            showingElapsed = false
+            return
+        }
+        showingElapsed = true
+        elapsedFlash = Task {
+            try? await Task.sleep(for: .seconds(3.5))
+            guard !Task.isCancelled else { return }
+            showingElapsed = false
+        }
     }
 
     private func chipButton(
@@ -302,10 +486,16 @@ struct ActiveRoutineView: View {
         return "\(start) – \(end)".uppercased()
     }
 
-    private var spareValue: String {
-        guard let spare = schedule.spareSeconds(projectedEnd: engine.projectedEndDate) else { return "—" }
-        if abs(spare) < 30 { return "ON TARGET" }
-        return "\(TimeFormatting.clockTime(from: spare))\(spare > 0 ? "" : " OVER")"
+    /// Nil on a good morning. Missing the finish-by target is the more useful
+    /// thing to say, so it wins over raw drift when both are true.
+    private var alertText: String? {
+        if let spare = schedule.spareSeconds(projectedEnd: engine.projectedEndDate), spare < 0,
+           let target = schedule.targetDate(on: engine.now) {
+            return "WON'T MAKE \(TimeFormatting.shortClockTime(from: target).uppercased())"
+        }
+        let delta = engine.scheduleDeltaSeconds
+        guard delta > RoutinePace.behindAlertSeconds else { return nil }
+        return RoutinePace.label(deltaSeconds: delta)
     }
 }
 

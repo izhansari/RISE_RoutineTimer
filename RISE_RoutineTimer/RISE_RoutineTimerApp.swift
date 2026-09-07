@@ -8,6 +8,7 @@
 import SwiftUI
 import SwiftData
 import CoreText
+import UIKit
 
 @main
 struct RISE_RoutineTimerApp: App {
@@ -47,7 +48,18 @@ struct RISE_RoutineTimerApp: App {
             if newPhase == .active {
                 alertCoordinator.applicationDidBecomeActive()
             }
+            syncIdleTimer()
         }
+        .onChange(of: engine.hasActiveRun, initial: true) { _, _ in
+            syncIdleTimer()
+        }
+    }
+
+    /// The screen stays on while a routine is running — wherever in the app
+    /// you are. This used to live on the Run tab and switched itself off in
+    /// `onDisappear`, so glancing at Today mid-routine let the phone sleep.
+    private func syncIdleTimer() {
+        UIApplication.shared.isIdleTimerDisabled = engine.hasActiveRun && scenePhase == .active
     }
 }
 

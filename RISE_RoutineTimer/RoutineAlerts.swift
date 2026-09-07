@@ -45,10 +45,6 @@ final class RoutineAlerts {
         settleAudioSession()
     }
 
-    func steppedBack() {
-        impactHaptic.impactOccurred()
-    }
-
     func stopSpeaking() {
         synthesizer.stopSpeaking(at: .immediate)
     }

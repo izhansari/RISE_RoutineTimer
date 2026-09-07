@@ -85,6 +85,20 @@ nonisolated struct RoutineStats {
         return (parts.hour ?? 0) * 3600 + (parts.minute ?? 0) * 60 + (parts.second ?? 0)
     }
 
+    // MARK: - Per-step averages
+
+    /// Typical actual time for one step over recent sessions, on the same
+    /// evidence rules as `suggestions`: only manual completions count, since
+    /// an auto-advanced step always "takes" exactly its planned time.
+    func averageActual(forStepID id: UUID) -> StepAverage? {
+        let recent = completed.prefix(Self.suggestionSessionWindow)
+        let samples = recent.flatMap { session in
+            session.steps.filter { $0.stepID == id && !$0.autoAdvanced && !$0.wasSkipped }.map(\.actualSeconds)
+        }
+        guard samples.count >= 2 else { return nil }
+        return StepAverage(averageSeconds: samples.reduce(0, +) / samples.count, sampleCount: samples.count)
+    }
+
     // MARK: - Suggestions
 
     static let suggestionMinimumSamples = 3
@@ -98,7 +112,7 @@ nonisolated struct RoutineStats {
 
         return steps.compactMap { step in
             let samples = recent.flatMap { session in
-                session.steps.filter { $0.stepID == step.id && !$0.autoAdvanced }.map(\.actualSeconds)
+                session.steps.filter { $0.stepID == step.id && !$0.autoAdvanced && !$0.wasSkipped }.map(\.actualSeconds)
             }
             guard samples.count >= Self.suggestionMinimumSamples else { return nil }
 
@@ -128,4 +142,9 @@ nonisolated struct RoutineStats {
         let rounded = Int((Double(seconds) / Double(unit)).rounded()) * unit
         return max(RoutineStep.minimumDurationSeconds, rounded)
     }
+}
+
+nonisolated struct StepAverage: Equatable {
+    var averageSeconds: Int
+    var sampleCount: Int
 }

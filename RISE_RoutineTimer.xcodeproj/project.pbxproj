@@ -6,6 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		36DD2B052FB6000000D0AB61 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 36DD2B032FB6000000D0AB61 /* WidgetKit.framework */; };
+		36DD2B062FB6000000D0AB61 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 36DD2B042FB6000000D0AB61 /* SwiftUI.framework */; };
+		36DD2B072FB6000000D0AB61 /* RISE_RoutineTimerWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 36DD2B022FB6000000D0AB61 /* RISE_RoutineTimerWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		36DD2A702FB57B2200D0AB00 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -14,12 +20,53 @@
 			remoteGlobalIDString = 36DD2A562FB57B2100D0AB61;
 			remoteInfo = RISE_RoutineTimer;
 		};
+		36DD2B082FB6000000D0AB61 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 36DD2A4F2FB57B2100D0AB61 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 36DD2B012FB6000000D0AB61;
+			remoteInfo = RISE_RoutineTimerWidgetExtension;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		36DD2B0A2FB6000000D0AB61 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				36DD2B072FB6000000D0AB61 /* RISE_RoutineTimerWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		36DD2A572FB57B2100D0AB61 /* RISE_RoutineTimer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RISE_RoutineTimer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		36DD2A702FB57B2200D0AB01 /* RISE_RoutineTimerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RISE_RoutineTimerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		36DD2B022FB6000000D0AB61 /* RISE_RoutineTimerWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = RISE_RoutineTimerWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		36DD2B032FB6000000D0AB61 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		36DD2B042FB6000000D0AB61 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		36DD2B0B2FB6000000D0AB61 /* Exceptions for "RISE_RoutineTimerWidget" folder in "RISE_RoutineTimerWidgetExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 36DD2B012FB6000000D0AB61 /* RISE_RoutineTimerWidgetExtension */;
+		};
+		36DD2B0C2FB6000000D0AB61 /* Exceptions for "RISE_RoutineTimerWidget" folder in "RISE_RoutineTimer" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				RoutineActivityAttributes.swift,
+			);
+			target = 36DD2A562FB57B2100D0AB61 /* RISE_RoutineTimer */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		36DD2A592FB57B2100D0AB61 /* RISE_RoutineTimer */ = {
@@ -30,6 +77,15 @@
 		36DD2A702FB57B2200D0AB02 /* RISE_RoutineTimerTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = RISE_RoutineTimerTests;
+			sourceTree = "<group>";
+		};
+		36DD2B0D2FB6000000D0AB61 /* RISE_RoutineTimerWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				36DD2B0C2FB6000000D0AB61 /* Exceptions for "RISE_RoutineTimerWidget" folder in "RISE_RoutineTimer" target */,
+				36DD2B0B2FB6000000D0AB61 /* Exceptions for "RISE_RoutineTimerWidget" folder in "RISE_RoutineTimerWidgetExtension" target */,
+			);
+			path = RISE_RoutineTimerWidget;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -49,6 +105,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		36DD2B102FB6000000D0AB61 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				36DD2B052FB6000000D0AB61 /* WidgetKit.framework in Frameworks */,
+				36DD2B062FB6000000D0AB61 /* SwiftUI.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -57,6 +122,8 @@
 			children = (
 				36DD2A592FB57B2100D0AB61 /* RISE_RoutineTimer */,
 				36DD2A702FB57B2200D0AB02 /* RISE_RoutineTimerTests */,
+				36DD2B0D2FB6000000D0AB61 /* RISE_RoutineTimerWidget */,
+				36DD2B0E2FB6000000D0AB61 /* Frameworks */,
 				36DD2A582FB57B2100D0AB61 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -66,8 +133,18 @@
 			children = (
 				36DD2A572FB57B2100D0AB61 /* RISE_RoutineTimer.app */,
 				36DD2A702FB57B2200D0AB01 /* RISE_RoutineTimerTests.xctest */,
+				36DD2B022FB6000000D0AB61 /* RISE_RoutineTimerWidgetExtension.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		36DD2B0E2FB6000000D0AB61 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				36DD2B032FB6000000D0AB61 /* WidgetKit.framework */,
+				36DD2B042FB6000000D0AB61 /* SwiftUI.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -80,10 +157,12 @@
 				36DD2A532FB57B2100D0AB61 /* Sources */,
 				36DD2A542FB57B2100D0AB61 /* Frameworks */,
 				36DD2A552FB57B2100D0AB61 /* Resources */,
+				36DD2B0A2FB6000000D0AB61 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				36DD2B092FB6000000D0AB61 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				36DD2A592FB57B2100D0AB61 /* RISE_RoutineTimer */,
@@ -118,6 +197,28 @@
 			productReference = 36DD2A702FB57B2200D0AB01 /* RISE_RoutineTimerTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		36DD2B012FB6000000D0AB61 /* RISE_RoutineTimerWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 36DD2B122FB6000000D0AB61 /* Build configuration list for PBXNativeTarget "RISE_RoutineTimerWidgetExtension" */;
+			buildPhases = (
+				36DD2B0F2FB6000000D0AB61 /* Sources */,
+				36DD2B102FB6000000D0AB61 /* Frameworks */,
+				36DD2B112FB6000000D0AB61 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				36DD2B0D2FB6000000D0AB61 /* RISE_RoutineTimerWidget */,
+			);
+			name = RISE_RoutineTimerWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = RISE_RoutineTimerWidgetExtension;
+			productReference = 36DD2B022FB6000000D0AB61 /* RISE_RoutineTimerWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -134,6 +235,9 @@
 					36DD2A702FB57B2200D0AB06 = {
 						CreatedOnToolsVersion = 26.5;
 						TestTargetID = 36DD2A562FB57B2100D0AB61;
+					};
+					36DD2B012FB6000000D0AB61 = {
+						CreatedOnToolsVersion = 26.5;
 					};
 				};
 			};
@@ -153,6 +257,7 @@
 			targets = (
 				36DD2A562FB57B2100D0AB61 /* RISE_RoutineTimer */,
 				36DD2A702FB57B2200D0AB06 /* RISE_RoutineTimerTests */,
+				36DD2B012FB6000000D0AB61 /* RISE_RoutineTimerWidgetExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -166,6 +271,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		36DD2A702FB57B2200D0AB05 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		36DD2B112FB6000000D0AB61 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -189,6 +301,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		36DD2B0F2FB6000000D0AB61 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -196,6 +315,11 @@
 			isa = PBXTargetDependency;
 			target = 36DD2A562FB57B2100D0AB61 /* RISE_RoutineTimer */;
 			targetProxy = 36DD2A702FB57B2200D0AB00 /* PBXContainerItemProxy */;
+		};
+		36DD2B092FB6000000D0AB61 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 36DD2B012FB6000000D0AB61 /* RISE_RoutineTimerWidgetExtension */;
+			targetProxy = 36DD2B082FB6000000D0AB61 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -332,11 +456,13 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = RISE;
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UIUserInterfaceStyle = Light;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -365,11 +491,13 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = RISE;
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UIUserInterfaceStyle = Light;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -429,6 +557,62 @@
 			};
 			name = Release;
 		};
+		36DD2B132FB6000000D0AB61 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7R387XZ2Y7;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = RISE_RoutineTimerWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = RISE;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.betternorms.RISE-RoutineTimer.Widget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		36DD2B142FB6000000D0AB61 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7R387XZ2Y7;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = RISE_RoutineTimerWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = RISE;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.betternorms.RISE-RoutineTimer.Widget";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -455,6 +639,15 @@
 			buildConfigurations = (
 				36DD2A702FB57B2200D0AB09 /* Debug */,
 				36DD2A702FB57B2200D0AB0A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		36DD2B122FB6000000D0AB61 /* Build configuration list for PBXNativeTarget "RISE_RoutineTimerWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				36DD2B132FB6000000D0AB61 /* Debug */,
+				36DD2B142FB6000000D0AB61 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

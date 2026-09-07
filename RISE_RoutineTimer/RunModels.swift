@@ -16,14 +16,38 @@ nonisolated struct RunStep: Codable, Equatable, Identifiable {
     var durationSeconds: Int
     var autoNext: Bool
     var notes: String
+    var autoShowNotes: Bool
 
-    init(id: UUID = UUID(), title: String, icon: String = "", durationSeconds: Int, autoNext: Bool = true, notes: String = "") {
+    init(
+        id: UUID = UUID(),
+        title: String,
+        icon: String = "",
+        durationSeconds: Int,
+        autoNext: Bool = true,
+        notes: String = "",
+        autoShowNotes: Bool = true
+    ) {
         self.id = id
         self.title = title
         self.icon = icon
         self.durationSeconds = max(1, durationSeconds)
         self.autoNext = autoNext
         self.notes = notes
+        self.autoShowNotes = autoShowNotes
+    }
+
+    /// Written by hand rather than synthesised so a run persisted by an older
+    /// build still decodes — the synthesised initialiser throws on a missing
+    /// key even when the property has a default.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        icon = try container.decodeIfPresent(String.self, forKey: .icon) ?? ""
+        durationSeconds = try container.decode(Int.self, forKey: .durationSeconds)
+        autoNext = try container.decode(Bool.self, forKey: .autoNext)
+        notes = try container.decodeIfPresent(String.self, forKey: .notes) ?? ""
+        autoShowNotes = try container.decodeIfPresent(Bool.self, forKey: .autoShowNotes) ?? true
     }
 
     var hasNotes: Bool {
@@ -40,7 +64,8 @@ extension RunStep {
             icon: model.icon,
             durationSeconds: model.durationSeconds,
             autoNext: model.autoNext,
-            notes: model.notes
+            notes: model.notes,
+            autoShowNotes: model.autoShowNotes
         )
     }
 }
@@ -52,6 +77,12 @@ nonisolated struct StepResult: Codable, Equatable {
     var plannedSeconds: Int
     var actualSeconds: Int
     var autoAdvanced: Bool
+    /// Set when the user skipped rather than finished. Optional so sessions
+    /// written before skipping existed still decode (a missing key on an
+    /// optional decodes as nil; on a non-optional it would throw).
+    var skipped: Bool?
+
+    var wasSkipped: Bool { skipped == true }
 
     var deltaSeconds: Int { actualSeconds - plannedSeconds }
 }
