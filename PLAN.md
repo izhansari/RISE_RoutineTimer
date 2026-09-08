@@ -342,6 +342,28 @@ toggles, and End Routine. The routine-end toggle from Run 14 went away — the e
   to "DRINK WA…". The leading region now carries `priority: 1`; a `maxWidth: .infinity` on it was tried first
   and blanked the trailing and bottom regions.
 
+### Run 18 — Draft editor, quieter chips (2026-09-08)
+
+- `StepEditorView` edits a draft: Cancel / Save (or Add for a new step), discard confirmation, no swipe-away when
+  dirty, no back button on a push. `StepEditRequest` carries `isNew` so a cancelled new step is deleted rather
+  than left as "New Step".
+- Run-tab idle rows no longer print the current step's note.
+- Check / skip chips are 72 % white instead of solid.
+- **Run-tab list edits by selection.** The toolbar pencil and the always-on `+` connectors are gone. Tap a step:
+  it highlights, `+` appears above and below it, and pencil (edit) / arrow (stats) buttons appear on the right.
+  New `StepStatsSheet` (plan, average / vs plan / best / last / skipped over recent runs, one-tap suggestion)
+  backed by `RoutineStats.history(forStepID:)` (`StepHistory`, tested). The full list (reorder / delete /
+  restore) moved to Settings › Routine.
+- **Swipe-to-delete and drag-to-reorder on the Run tab.** The idle list became a plain `List`. A drag only sets a
+  pending order; CANCEL / SAVE ORDER replace the Start button until it is confirmed or dropped. The chime / voice
+  speaker menu left the Run toolbar for Settings › Alerts, leaving the toolbar empty.
+- A pending reorder now locks the screen: tab bar hidden, no selection / swipe / add / sheets until Cancel or Save.
+- **App Intents:** Start Morning Routine (opens the app on Run) and I'm Awake (confirms, then logs the wake time;
+  does not open the app). Both listed as App Shortcuts. Meant for a charger-unplug automation in Shortcuts.
+- Editor: red asterisk on Task, Add / Save dims and pulses the missing field on tap, ✕ on a new step's sheet.
+- Active screen: notes sheet slides in a beat after the step lands; a `note.text` button beside pause when the
+  step has a note; the check / skip chips invert once the fill rises past them.
+
 ### Later (next)
 17. iCloud sync via SwiftData + CloudKit (decide **before** run 2: CloudKit requires all properties to have defaults and all relationships optional, which constrains the `RoutineSession` design).
 18. Multiple routines / profiles if "our routine" means more than one person.

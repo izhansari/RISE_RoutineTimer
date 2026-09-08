@@ -107,4 +107,48 @@ final class RoutineStatsTests: XCTestCase {
         XCTAssertEqual(RoutineStats.roundedDuration(1000), 1020)
         XCTAssertEqual(RoutineStats.roundedDuration(2), RoutineStep.minimumDurationSeconds)
     }
+
+    // MARK: - Step history
+
+    private func stepResult(_ id: UUID, actual: Int, auto: Bool = false, skipped: Bool = false) -> StepResult {
+        StepResult(stepID: id, title: "Dua", plannedSeconds: 300, actualSeconds: actual, autoAdvanced: auto, skipped: skipped)
+    }
+
+    func testStepHistorySummarisesManualSamplesSkipsAndAutoAdvances() {
+        let id = UUID()
+        let stats = RoutineStats(sessions: [
+            session(dayOffset: 0, active: 1200, steps: [stepResult(id, actual: 240)]),
+            session(dayOffset: -1, active: 1200, steps: [stepResult(id, actual: 360)]),
+            session(dayOffset: -2, active: 1200, steps: [stepResult(id, actual: 300, auto: true)]),
+            session(dayOffset: -3, active: 1200, steps: [stepResult(id, actual: 20, skipped: true)]),
+            session(dayOffset: -4, active: 100, completed: false, steps: [stepResult(id, actual: 1)]),
+        ], calendar: calendar)
+
+        let history = stats.history(forStepID: id)
+        XCTAssertEqual(history.appearances, 4, "abandoned sessions are not evidence")
+        XCTAssertEqual(history.manualSamples, [240, 360], "newest first, manual completions only")
+        XCTAssertEqual(history.averageSeconds, 300)
+        XCTAssertEqual(history.bestSeconds, 240)
+        XCTAssertEqual(history.lastSeconds, 240)
+        XCTAssertEqual(history.skipped, 1)
+        XCTAssertEqual(history.autoAdvanced, 1)
+        XCTAssertTrue(history.hasEvidence)
+    }
+
+    func testStepHistoryNeedsTwoManualSamplesForAnAverage() {
+        let id = UUID()
+        let stats = RoutineStats(sessions: [
+            session(dayOffset: 0, active: 1200, steps: [stepResult(id, actual: 250)]),
+        ], calendar: calendar)
+
+        let history = stats.history(forStepID: id)
+        XCTAssertNil(history.averageSeconds)
+        XCTAssertEqual(history.lastSeconds, 250)
+        XCTAssertEqual(history.bestSeconds, 250)
+        XCTAssertTrue(history.hasEvidence)
+
+        let unknown = stats.history(forStepID: UUID())
+        XCTAssertFalse(unknown.hasEvidence)
+        XCTAssertEqual(unknown, StepHistory(appearances: 0, manualSamples: [], skipped: 0, autoAdvanced: 0))
+    }
 }

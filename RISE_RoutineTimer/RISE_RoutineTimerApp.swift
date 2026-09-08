@@ -17,6 +17,7 @@ struct RISE_RoutineTimerApp: App {
     // The engine restores any in-progress run from disk, and the coordinator
     // is attached before the first tick so alerts are never missed.
     @State private var engine: RoutineEngine
+    @State private var navigation = AppNavigation()
     private let alertCoordinator: RoutineAlertCoordinator
 
     private let sharedModelContainer: ModelContainer
@@ -36,12 +37,21 @@ struct RISE_RoutineTimerApp: App {
         let recorder = SessionRecorder(context: sharedModelContainer.mainContext)
         _engine = State(initialValue: engine)
         alertCoordinator = RoutineAlertCoordinator(engine: engine) { recorder.record($0) }
+
+        // App Intents are built by the system, outside the view tree; this
+        // is how they reach the same engine and store the views use.
+        let navigation = AppNavigation()
+        _navigation = State(initialValue: navigation)
+        AppServices.engine = engine
+        AppServices.container = sharedModelContainer
+        AppServices.navigation = navigation
     }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environment(engine)
+                .environment(navigation)
         }
         .modelContainer(sharedModelContainer)
         .onChange(of: scenePhase) { _, newPhase in

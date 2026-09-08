@@ -187,3 +187,71 @@ struct ReceiptRule: View {
             .frame(height: 1)
     }
 }
+
+// MARK: - Boxed stats
+
+/// A titled hairline box. Where one group ends and the next begins is drawn,
+/// not implied by whitespace — evenly spaced rows made it unclear which
+/// numbers belonged together. Shared by the run sheet and the step stats.
+struct ReceiptSection<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(2)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 2)
+            VStack(spacing: 0) {
+                content
+            }
+            .padding(.horizontal, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
+            )
+        }
+        .padding(.bottom, 16)
+    }
+}
+
+/// One `LABEL  detail ........ value` line inside a `ReceiptSection`.
+struct ReceiptStatRow: View {
+    let label: String
+    let value: String
+    var detail: String? = nil
+
+    init(_ label: String, _ value: String, detail: String? = nil) {
+        self.label = label
+        self.value = value
+        self.detail = detail
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(2)
+                .foregroundStyle(.secondary)
+            if let detail {
+                Text(detail.uppercased())
+                    .font(.system(size: 9, weight: .medium))
+                    .tracking(1.2)
+                    .foregroundStyle(.tertiary)
+            }
+            Spacer()
+            Text(value)
+                .font(analogFont(18))
+                .tracking(1)
+                .monospacedDigit()
+        }
+        .padding(.vertical, 8)
+    }
+}

@@ -99,6 +99,24 @@ nonisolated struct RoutineStats {
         return StepAverage(averageSeconds: samples.reduce(0, +) / samples.count, sampleCount: samples.count)
     }
 
+    /// Everything the step-stats sheet shows for one step, over the same
+    /// recent window as `suggestions`. Averages use manual completions only
+    /// (an auto-advanced step always "takes" its planned time); the skip and
+    /// auto-advance counts cover every appearance.
+    func history(forStepID id: UUID) -> StepHistory {
+        let recent = completed.prefix(Self.suggestionSessionWindow)
+        let appearances = recent.flatMap { session in
+            session.steps.filter { $0.stepID == id }
+        }
+        let manual = appearances.filter { !$0.autoAdvanced && !$0.wasSkipped }.map(\.actualSeconds)
+        return StepHistory(
+            appearances: appearances.count,
+            manualSamples: manual,
+            skipped: appearances.filter(\.wasSkipped).count,
+            autoAdvanced: appearances.filter { $0.autoAdvanced && !$0.wasSkipped }.count
+        )
+    }
+
     // MARK: - Suggestions
 
     static let suggestionMinimumSamples = 3
@@ -147,4 +165,20 @@ nonisolated struct RoutineStats {
 nonisolated struct StepAverage: Equatable {
     var averageSeconds: Int
     var sampleCount: Int
+}
+
+/// One step's recent record. `manualSamples` are newest first.
+nonisolated struct StepHistory: Equatable {
+    var appearances: Int
+    var manualSamples: [Int]
+    var skipped: Int
+    var autoAdvanced: Int
+
+    var averageSeconds: Int? {
+        guard manualSamples.count >= 2 else { return nil }
+        return manualSamples.reduce(0, +) / manualSamples.count
+    }
+    var bestSeconds: Int? { manualSamples.min() }
+    var lastSeconds: Int? { manualSamples.first }
+    var hasEvidence: Bool { appearances > 0 }
 }

@@ -107,7 +107,7 @@ struct ActiveRoutineView: View {
                         content(textColor: textColor, insets: insets)
                     }
 
-                    controls(insets: insets)
+                    controls(insets: insets, height: geo.size.height)
                 }
                 .blur(radius: engine.isPaused ? 18 : 0)
                 .scaleEffect(engine.isPaused ? 1.06 : 1)
@@ -297,16 +297,23 @@ struct ActiveRoutineView: View {
 
     // MARK: - Controls (outside the fill — built once)
 
-    private func controls(insets: EdgeInsets) -> some View {
-        VStack(spacing: 0) {
+    private func controls(insets: EdgeInsets, height: CGFloat) -> some View {
+        // The chips follow the inversion rule everything else on the screen
+        // obeys: dark on the white page, white once the fill has risen past
+        // them. Measured at the chip's centre line so the switch is one snap,
+        // like every other transition here.
+        let chipCentreFromBottom = bottomInset(insets) + barHeight + barGap + nextZoneHeight + buttonSlotHeight / 2
+        let inverted = engine.currentStepFillProgress * height >= chipCentreFromBottom
+
+        return VStack(spacing: 0) {
             Spacer(minLength: 0)
 
             // Mirrors the reserved slots in `content` exactly. The placeholder
             // opposite the skip chip keeps the checkmark on the centre line.
             HStack(spacing: 20) {
                 Color.clear.frame(width: 46, height: 46)
-                completeButton
-                chipButton("forward.end", diameter: 46, label: "Skip or defer this step") {
+                completeButton(inverted: inverted)
+                chipButton("forward.end", diameter: 46, label: "Skip or defer this step", inverted: inverted) {
                     confirmingSkip = true
                 }
             }
@@ -325,7 +332,7 @@ struct ActiveRoutineView: View {
     /// One quiet button at one size, whatever the step. The *border* carries
     /// the auto-next signal: dashed when the step will advance on its own,
     /// solid when it is waiting on this tap.
-    private var completeButton: some View {
+    private func completeButton(inverted: Bool) -> some View {
         let isRequired = engine.currentStep?.autoNext == false
 
         return Button {
@@ -333,18 +340,18 @@ struct ActiveRoutineView: View {
         } label: {
             Image(systemName: "checkmark")
                 .font(.system(size: checkDiameter * 0.34, weight: .regular))
-                .foregroundStyle(Color(hex: 0x111111).opacity(0.55))
+                .foregroundStyle(inverted ? Color.white.opacity(0.92) : Color(hex: 0x111111).opacity(0.55))
                 .frame(width: checkDiameter, height: checkDiameter)
-                .background(Circle().fill(Color.white))
+                .background(Circle().fill(inverted ? invertedChipFill : chipFill))
                 .overlay {
                     Circle().strokeBorder(
-                        Color.black.opacity(isRequired ? 0.4 : 0.28),
+                        inverted ? Color.white.opacity(isRequired ? 0.9 : 0.7) : Color.black.opacity(isRequired ? 0.4 : 0.28),
                         style: isRequired
                             ? StrokeStyle(lineWidth: 2)
                             : StrokeStyle(lineWidth: 2, dash: [4, 5])
                     )
                 }
-                .shadow(color: .black.opacity(0.1), radius: 10, y: 3)
+                .shadow(color: .black.opacity(inverted ? 0 : 0.1), radius: 10, y: 3)
         }
         .buttonStyle(PressScaleStyle())
         .accessibilityLabel(isRequired ? "Complete step" : "Finish this step early")
@@ -372,6 +379,12 @@ struct ActiveRoutineView: View {
 
             HStack(spacing: 0) {
                 barButton("pause.fill", label: "Pause routine") { engine.pause() }
+                // Only when there is a note: the icon is the signal that this
+                // step has one, as much as the way to open it. A clear slot on
+                // the right keeps the centre label centred.
+                if hasNotes {
+                    barButton("note.text", label: "Show this step's notes") { onShowNotes(false) }
+                }
 
                 Spacer(minLength: 0)
 
@@ -396,6 +409,9 @@ struct ActiveRoutineView: View {
 
                 Spacer(minLength: 0)
 
+                if hasNotes {
+                    Color.clear.frame(width: 52, height: barHeight - progressEdgeHeight)
+                }
                 barButton("chevron.up", label: "Run details") { showingRunSheet = true }
             }
             .frame(height: barHeight - progressEdgeHeight)
@@ -453,20 +469,29 @@ struct ActiveRoutineView: View {
         }
     }
 
+    /// The check and skip chips let a little of the fill through. Solid white
+    /// read as stark against the saturated page; the bottom bar stays opaque
+    /// because its progress edge would otherwise fight the fill colour.
+    private var chipFill: Color { Color.white.opacity(0.72) }
+    /// Under the fill the chip is a ghost: a whisper of white with a white
+    /// glyph, the same way the type below the line turns white.
+    private var invertedChipFill: Color { Color.white.opacity(0.16) }
+
     private func chipButton(
         _ systemName: String,
         diameter: CGFloat,
         label: String,
+        inverted: Bool,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: diameter * 0.34, weight: .semibold))
-                .foregroundStyle(Color(hex: 0x111111).opacity(0.75))
+                .foregroundStyle(inverted ? Color.white.opacity(0.92) : Color(hex: 0x111111).opacity(0.75))
                 .frame(width: diameter, height: diameter)
-                .background(Circle().fill(Color.white))
-                .overlay(Circle().strokeBorder(Color.black.opacity(0.08), lineWidth: 1))
-                .shadow(color: .black.opacity(0.12), radius: 10, y: 3)
+                .background(Circle().fill(inverted ? invertedChipFill : chipFill))
+                .overlay(Circle().strokeBorder(inverted ? Color.white.opacity(0.7) : Color.black.opacity(0.08), lineWidth: 1))
+                .shadow(color: .black.opacity(inverted ? 0 : 0.12), radius: 10, y: 3)
         }
         .buttonStyle(PressScaleStyle())
         .accessibilityLabel(label)

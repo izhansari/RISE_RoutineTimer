@@ -18,6 +18,8 @@ struct SettingsView: View {
     @AppStorage(TargetSchedule.targetKey) private var targetMinutes = TargetSchedule.none
     @AppStorage(TargetSchedule.reminderKey) private var reminderEnabled = false
     @AppStorage(FillTheme.storageKey) private var fillThemeRaw = FillTheme.default.rawValue
+    @AppStorage(RoutineAlertCoordinator.soundsKey) private var soundsEnabled = true
+    @AppStorage(RoutineAlertCoordinator.voiceKey) private var voiceEnabled = true
     @AppStorage(ActiveScreenSettings.showNextStepKey) private var showNextStep = true
     @AppStorage(MorningSettings.targetWakeKey) private var targetWakeMinutes = MorningSettings.defaultTargetWakeMinutes
     @AppStorage(MorningSettings.snoozeBudgetKey) private var snoozeBudget = MorningSettings.defaultSnoozeBudget
@@ -25,13 +27,17 @@ struct SettingsView: View {
 
     let steps: [RoutineStep]
 
+    @State private var editingList = false
+
     private var plannedSeconds: Int { steps.reduce(0) { $0 + $1.durationSeconds } }
     private var schedule: TargetSchedule { TargetSchedule(targetMinutesAfterMidnight: targetMinutes) }
 
     var body: some View {
         NavigationStack {
             List {
+                routineSection
                 timerSection
+                alertsSection
                 wakeGoalSection
                 targetSection
                 #if DEBUG
@@ -39,6 +45,9 @@ struct SettingsView: View {
                 #endif
             }
             .navigationTitle("Settings")
+            .sheet(isPresented: $editingList) {
+                RoutineListView(steps: steps)
+            }
             .onChange(of: targetMinutes) { _, _ in syncReminder() }
             .onChange(of: reminderEnabled) { _, _ in syncReminder() }
             .onChange(of: plannedSeconds) { _, _ in syncReminder() }
@@ -69,6 +78,33 @@ struct SettingsView: View {
     #endif
 
     // MARK: - Sections
+
+    /// Used to be a speaker menu in the Run tab's toolbar. Settings that are
+    /// set once belong here, not on the pre-flight screen.
+    private var alertsSection: some View {
+        Section {
+            Toggle(isOn: $soundsEnabled) { Label("Chimes", systemImage: "bell") }
+            Toggle(isOn: $voiceEnabled) { Label("Voice", systemImage: "waveform") }
+        } header: {
+            Text("Alerts")
+        } footer: {
+            Text("Chimes sound at every step change, even on silent. Voice reads each step's name as it starts.")
+        }
+    }
+
+    /// Day-to-day editing happens on the Run tab (tap a step). The full list
+    /// is only for reordering, deleting several at once, or starting over.
+    private var routineSection: some View {
+        Section {
+            Button { editingList = true } label: {
+                Label("Full Step List", systemImage: "list.bullet")
+            }
+        } header: {
+            Text("Routine")
+        } footer: {
+            Text("Edit, add, reorder and delete steps on the Run tab. The full list is for duplicating a step or restoring the starter routine.")
+        }
+    }
 
     /// Timer appearance: fill colour plus the two optional lines.
     private var timerSection: some View {

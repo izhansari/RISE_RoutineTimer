@@ -2,11 +2,10 @@
 //  RoutineListView.swift
 //  RISE_RoutineTimer
 //
-//  The step list editor. Presented as a sheet from the Run tab's Edit button
-//  rather than living in a tab of its own: the Run tab already shows the
-//  steps, and editing them from somewhere else was a needless round trip.
-//
-//  Settings that are not steps live in `SettingsView`.
+//  The full step list: reorder, swipe-delete, duplicate, restore the starter
+//  routine. Presented as a sheet from Settings. Day-to-day editing does not
+//  come here — tapping a step on the Run tab edits it in place — so this is
+//  the occasional-use tool, not the front door.
 //
 
 import SwiftData
@@ -28,7 +27,7 @@ struct RoutineListView: View {
             List {
                 Section {
                     ForEach(steps) { step in
-                        NavigationLink(value: step) {
+                        NavigationLink(value: StepEditRequest(step: step)) {
                             RoutineStepRow(step: step)
                         }
                         .swipeActions(edge: .leading) {
@@ -58,8 +57,8 @@ struct RoutineListView: View {
             }
             .navigationTitle("Edit Routine")
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: RoutineStep.self) { step in
-                StepEditorView(step: step)
+            .navigationDestination(for: StepEditRequest.self) { request in
+                StepEditorView(request: request)
             }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -90,7 +89,7 @@ struct RoutineListView: View {
         )
         modelContext.insert(step)
         saveChanges()
-        path.append(step)
+        path.append(StepEditRequest(step: step, isNew: true))
     }
 
     private func duplicate(_ source: RoutineStep) {

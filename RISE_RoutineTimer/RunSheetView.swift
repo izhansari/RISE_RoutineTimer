@@ -85,22 +85,7 @@ struct RunSheetView: View {
     /// whitespace — the earlier version spaced everything evenly and it was
     /// not obvious which numbers belonged together.
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(2)
-                .foregroundStyle(.secondary)
-                .padding(.leading, 2)
-            VStack(spacing: 0) {
-                content()
-            }
-            .padding(.horizontal, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
-            )
-        }
-        .padding(.bottom, 16)
+        ReceiptSection(title, content: content)
     }
 
     private var noteRow: some View {
@@ -167,23 +152,6 @@ struct RunSheetView: View {
     }
 
     private func statRow(_ label: String, _ value: String, detail: String? = nil) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(label.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(2)
-                .foregroundStyle(.secondary)
-            if let detail {
-                Text(detail.uppercased())
-                    .font(.system(size: 9, weight: .medium))
-                    .tracking(1.2)
-                    .foregroundStyle(.tertiary)
-            }
-            Spacer()
-            Text(value)
-                .font(analogFont(18))
-                .tracking(1)
-                .monospacedDigit()
-        }
-        .padding(.vertical, 8)
+        ReceiptStatRow(label, value, detail: detail)
     }
 }

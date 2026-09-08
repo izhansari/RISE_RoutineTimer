@@ -13,14 +13,18 @@ struct ContentView: View {
     @Query(sort: \RoutineStep.sortOrder, order: .forward) private var steps: [RoutineStep]
     @AppStorage("seededRoutineVersion") private var seededRoutineVersion = 0
 
-    /// Today is the landing screen: the morning starts before the routine does.
-    @State private var selectedTab: Tab = .today
+    /// Today is the landing screen: the morning starts before the routine
+    /// does. The selection lives in `AppNavigation` so an App Intent that
+    /// starts the routine can land the app on the Run tab.
+    @Environment(AppNavigation.self) private var navigation
 
-    private enum Tab: Hashable { case today, run, history, settings }
+    private typealias Tab = AppNavigation.Tab
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            TodayView(steps: steps, onStartRoutine: { selectedTab = .run })
+        @Bindable var navigation = navigation
+
+        TabView(selection: $navigation.selectedTab) {
+            TodayView(steps: steps, onStartRoutine: { navigation.selectedTab = .run })
                 .tabItem {
                     Label("Today", systemImage: "sun.max")
                 }
@@ -111,4 +115,5 @@ struct ContentView: View {
     ContentView()
         .modelContainer(for: [RoutineStep.self, RoutineSession.self, MorningLog.self], inMemory: true)
         .environment(RoutineEngine(store: nil))
+        .environment(AppNavigation())
 }
