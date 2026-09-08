@@ -96,6 +96,26 @@ struct MarkAwakeIntent: AppIntent {
     }
 }
 
+// MARK: - Open Today
+
+struct OpenTodayIntent: AppIntent {
+    static let title: LocalizedStringResource = "Open Today"
+    static let description = IntentDescription(
+        "Opens RISE on the Today tab, where the morning is scored: wake time, activation, budgets and the day's timeline."
+    )
+    static let openAppWhenRun = true
+
+    // The protocol requirement is nonisolated; the navigation is not.
+    @MainActor
+    func perform() async throws -> some IntentResult {
+        guard let navigation = AppServices.navigation else {
+            throw RoutineIntentError.appNotReady
+        }
+        navigation.selectedTab = .today
+        return .result()
+    }
+}
+
 // MARK: - Errors
 
 enum RoutineIntentError: Error, CustomLocalizedStringResourceConvertible {
@@ -132,6 +152,15 @@ struct RISEShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "I'm Awake",
             systemImageName: "sun.max"
+        )
+        AppShortcut(
+            intent: OpenTodayIntent(),
+            phrases: [
+                "Open Today in \(.applicationName)",
+                "Show my morning in \(.applicationName)",
+            ],
+            shortTitle: "Open Today",
+            systemImageName: "sun.horizon"
         )
     }
 }

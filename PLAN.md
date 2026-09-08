@@ -362,7 +362,10 @@ toggles, and End Routine. The routine-end toggle from Run 14 went away — the e
   does not open the app). Both listed as App Shortcuts. Meant for a charger-unplug automation in Shortcuts.
 - Editor: red asterisk on Task, Add / Save dims and pulses the missing field on tap, ✕ on a new step's sheet.
 - Active screen: notes sheet slides in a beat after the step lands; a `note.text` button beside pause when the
-  step has a note; the check / skip chips invert once the fill rises past them.
+  step has a note; the check / skip chips are drawn inside the inverting fill's layers, so the fill line
+  crosses them like the type rather than flipping them whole.
+- Both chips carry the same dashed border now; the AUTO / MANUAL capsule is the only auto-next signal.
+- Third App Intent: Open Today.
 
 ### Later (next)
 17. iCloud sync via SwiftData + CloudKit (decide **before** run 2: CloudKit requires all properties to have defaults and all relationships optional, which constrains the `RoutineSession` design).
