@@ -31,6 +31,7 @@ RISE_RoutineTimer/
   RunModels.swift               – Codable value types: RunStep, StepResult, RoutineRun, SessionResult, PlannedAlert
   RoutineEngine.swift           – @Observable timer engine; all time math; persists the run via RunStore
   RoutineStats.swift            – stats over sessions: averages, streak, trend, per-step suggestions + StepHistory
+  ProjectedSchedule.swift       – where every step of the run sits on the clock (ProjectedStep)
   MorningMetrics.swift          – snooze / activation / duration, baselines, spread, budgets, missed days, insights
   TargetSchedule.swift          – finish-by target math: start-by time, spare time, reminder components
   RoutinePace.swift             – FillTheme palette, per-step StepPace, cumulative pace label
@@ -45,7 +46,8 @@ RISE_RoutineTimer/
   TodayView.swift               – "Today" tab (landing): wake CTA, day timeline, performance tiles, budgets, insight
   RoutineTimerView.swift        – "Run" tab: idle screen (ready/paused/complete); delegates the running screen
   ActiveRoutineView.swift       – the running-timer screen (see "Active screen" below)
-  RunSheetView.swift            – the sheet behind the bottom bar's chevron: note, run stats, toggles, end
+  RunSheetView.swift            – the sheet behind the bottom bar's chevron: schedule, note, run stats, toggles, end
+  ScheduleTapeView.swift        – the scrubbable schedule tape, where a step's width is its duration
   InvertingFillView.swift       – the two-layer colour-inverting fill
   PauseOverlay.swift            – the dimmed "PAUSED" layer over the running timer
   StepNotesView.swift           – editable notes sheet (+ read-only fallback)
@@ -78,6 +80,7 @@ RISE_RoutineTimerWidget/          – the RISE_RoutineTimerWidgetExtension targe
 RISE_RoutineTimerTests/
   RoutineEngineTests.swift      – engine time math driven with synthetic dates
   RoutineStatsTests.swift       – stats and suggestion tests
+  ProjectedScheduleTests.swift  – laying the run out on the clock, forwards and backwards
   MorningMetricsTests.swift     – snooze / activation / baselines / spread / budgets / missed days / streak
   StepPaceTests.swift           – per-step pace colours, theme/overtime separation, glyph catalog
   TargetScheduleTests.swift     – target/start-by tests
@@ -89,7 +92,7 @@ RISE_RoutineTimerTests/
 xcodebuild -scheme RISE_RoutineTimer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
-89 tests — mostly pure value-type math against synthetic dates; the suite runs in well under a second. The build should be warning-free; keep it that way.
+95 tests — mostly pure value-type math against synthetic dates; the suite runs in well under a second. The build should be warning-free; keep it that way.
 
 The Xcode project uses synchronized buildable folders, so new `.swift` files dropped into `RISE_RoutineTimer/` or `RISE_RoutineTimerTests/` are picked up with no pbxproj surgery.
 
@@ -143,7 +146,16 @@ The Xcode project uses synchronized buildable folders, so new `.swift` files dro
 - The bar must stay an **opaque floating chip**: it sits at the bottom, inside the coloured fill for most of a step, and its progress edge would fight the fill colour otherwise. Same reasoning as the check and skip chips.
 - Two progress indicators, on purpose: the rising fill is *this step*, the bar's edge is *the whole routine*. Unlike the depleting ring that was cut earlier, they do not say the same thing twice.
 - Tapping the bar's centre swaps `DONE AT` for `MM:SS ELAPSED`; tapping again swaps straight back, and left alone it reverts after 3.5 s (`toggleElapsed`). The two readings roll vertically (`rollUp`, an asymmetric move+opacity transition) so the swap reads as a ticker turning over, not a crossfade. Animation is allowed there because the bar is in the control layer, outside the fill's `transaction { animation = nil }`.
+- The tape is the only thing in the sheet that runs edge to edge — scrubbing feels wrong when it stops short of the sheet — so the body's 22pt margin moved off the outer `VStack` and onto the header and the sections instead.
 - `RunSheetView` draws each section as a titled hairline box (`ReceiptSection` / `ReceiptStatRow` in `ReceiptUI`, shared with `StepStatsSheet`), so where one group ends and the next begins is drawn rather than implied by whitespace — evenly spaced rows made it unclear which numbers belonged together. Rows are 8pt tall; sections sit 16pt apart.
+- **The run sheet opens with a schedule tape** (`ScheduleTapeView`) that answers the only question anyone asks mid-routine: *when am I free?* It is a horizontal strip of the whole routine where **a step's width is its duration**, scrubbed under a fixed centre playhead, with a clock ruler beneath. Coffee is a wide plain, the four shower steps are one tight cluster — the shape of the morning reads without a number being written down. The readout above it reports whatever is under the playhead: clock time, `IN 12 MIN`, the step's name, and when it ends. It opens centred on now, and a `NOW` pill appears once the playhead is more than 45 s away from it.
+- **This is the one surface in the app that tracks a finger continuously**, against the everything-snaps rule. A scrubber that snapped would just be broken. The line: *the tape moves smoothly, the readout snaps* — every value it shows is at minute resolution, so it cuts rather than eases, and crossing into a step fires `UISelectionFeedbackGenerator` the way a picker does.
+- Three things about the tape are load-bearing and were each got wrong first:
+  1. **The viewport width comes from a `GeometryReader`, not a preference.** The content pads itself by half a screen at each end so the first and last steps can reach the centre, and it needs the width *during* layout — a preference arrives a pass late and the tape opens at step one instead of at now.
+  2. **The scroll offset is read with `onChange` on the geometry, not `onPreferenceChange`.** A preference raised inside the ScrollView's content never arrived: the value stayed pinned at 0 while the tape scrolled, so the readout sat on the first step for ever. `onScrollGeometryChange` would be the modern answer but is iOS 18.
+  3. **`.id()` must come before `.padding()` on the now-marker.** Padding applied after `.id()` becomes part of the identified view, and `scrollTo(anchor: .center)` then centres that whole box — landing at exactly half the intended offset. The marker is held in place by a sibling spacer instead.
+- Points are not linear in time on the tape: a very short step is floored at 26pt so its glyph still fits, so `time(atX:)` and `x(atTime:)` both walk the bands rather than dividing.
+- `ProjectedStep.project(...)` is the math, and it is pure and tested. The past is walked **backwards** from the current step's start using what each step really took, rather than forwards from `run.startedAt` — pauses and deferred steps make the forward walk drift, and the one moment that has to be exactly right is now. Finished steps are matched to their results **by id, not position**, because deferring a step records no result. The current step's end is clamped to `now` once it is in overtime, the same clamp `remainingPlannedSeconds` applies, so the tape's last end and the bottom bar's `DONE AT` can never disagree — `ProjectedScheduleTests` pins that.
 - `RunSheetView` holds what was cut from the screen for density — a `5:12 – 5:57 AM` run range (`TimeFormatting.clockRange`), elapsed, pace, spare vs target, step *n* of *m* — plus a **This step** section: planned duration, the step's average actual time over recent runs (`RoutineStats.averageActual(forStepID:)`, same evidence rules as suggestions: manual completions only, ≥2 samples), and the difference against plan. Then the step's note, the two display toggles, and End Routine. "Add" on a note-less step hands off with `editing: true`, and `StepNotesView(startEditing:)` opens fully with the keyboard up — dragging the sheet open and finding Edit was three steps too many. It dismisses itself before handing off to the notes sheet or the end dialog; `afterSheetDismisses` waits ~420 ms for the dismissal animation, or SwiftUI drops one of the two presentations.
 - Two lines on the screen are optional, both `@AppStorage` via `ActiveScreenSettings`: the step start/end times at the top, and the NEXT zone. `nextZoneHeight` is computed from its setting, and the control layer's slot stack (`buttonSlotHeight`, `nextZoneHeight`, `barGap + barHeight`) mirrors the type layer's reserved `Color.clear` frames exactly — change one side without the other and the checkmark drifts. The toggles live in both the run sheet and Settings, sharing keys.
 - **There is no undo / go-back-a-step.** It was removed from the engine as well as the UI (`undoLastStep` and the `.steppedBack` event are gone), so don't reintroduce a button expecting engine support. Skip and defer are the forward-only replacements.

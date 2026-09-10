@@ -247,6 +247,19 @@ final class RoutineEngine {
         return now.addingTimeInterval(TimeInterval(remainingPlannedSeconds))
     }
 
+    /// Every step of the run laid out on the clock, as of `now`. Empty when
+    /// there is no live run — a finished one has nothing left to project.
+    var projectedSchedule: [ProjectedStep] {
+        guard let run, run.phase != .complete else { return [] }
+        return ProjectedStep.project(
+            steps: run.steps,
+            results: run.results,
+            currentIndex: run.currentIndex,
+            stepElapsed: stepElapsed,
+            now: now
+        )
+    }
+
     var pausedSeconds: Int {
         guard let run else { return 0 }
         var total = run.totalPausedSeconds

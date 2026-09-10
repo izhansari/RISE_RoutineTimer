@@ -26,12 +26,14 @@ struct RunSheetView: View {
     /// Likewise for the end-routine confirmation.
     let onEnd: () -> Void
 
+    @AppStorage(FillTheme.storageKey) private var fillThemeRaw = FillTheme.default.rawValue
     @AppStorage(ActiveScreenSettings.showStepTimesKey) private var showStepTimes = true
     @AppStorage(ActiveScreenSettings.showNextStepKey) private var showNextStep = true
 
     @Query(sort: \RoutineSession.startedAt, order: .reverse) private var sessions: [RoutineSession]
 
     private var stats: RoutineStats { RoutineStats(sessions: sessions.map(\.result)) }
+    private var theme: FillTheme { FillTheme(rawValue: fillThemeRaw) ?? .default }
 
     var body: some View {
         ScrollView {
@@ -39,26 +41,34 @@ struct RunSheetView: View {
                 header
                     .padding(.top, 16)
                     .padding(.bottom, 14)
+                    .padding(.horizontal, 22)
 
-                section("Note") { noteRow }
-                section("This run") { runStats }
-                section("This step") { stepStats }
-                section("Display") {
-                    ReceiptToggle(title: "Step times", isOn: $showStepTimes)
-                        .padding(.vertical, 9)
-                    ReceiptRule()
-                    ReceiptToggle(title: "Next step", isOn: $showNextStep)
-                        .padding(.vertical, 9)
-                }
+                // The tape is the one thing here that runs edge to edge —
+                // scrubbing feels wrong when it stops short of the sheet.
+                // Everything else keeps the 22pt margin.
+                scheduleSection
 
-                ReceiptButton(title: "End routine", fill: Color(hex: 0xDB2118)) {
-                    dismiss()
-                    onEnd()
+                VStack(alignment: .leading, spacing: 0) {
+                    section("Note") { noteRow }
+                    section("This run") { runStats }
+                    section("This step") { stepStats }
+                    section("Display") {
+                        ReceiptToggle(title: "Step times", isOn: $showStepTimes)
+                            .padding(.vertical, 9)
+                        ReceiptRule()
+                        ReceiptToggle(title: "Next step", isOn: $showNextStep)
+                            .padding(.vertical, 9)
+                    }
+
+                    ReceiptButton(title: "End routine", fill: Color(hex: 0xDB2118)) {
+                        dismiss()
+                        onEnd()
+                    }
+                    .padding(.top, 2)
+                    .padding(.bottom, 28)
                 }
-                .padding(.top, 2)
-                .padding(.bottom, 28)
+                .padding(.horizontal, 22)
             }
-            .padding(.horizontal, 22)
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
@@ -76,6 +86,25 @@ struct RunSheetView: View {
             ReceiptSheetTitle(title: engine.currentStep?.title ?? "Routine")
         }
         .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Schedule
+
+    @ViewBuilder
+    private var scheduleSection: some View {
+        let schedule = engine.projectedSchedule
+        if schedule.count > 1 {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("SCHEDULE")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(2)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 24)
+
+                ScheduleTapeView(schedule: schedule, now: engine.now, tint: theme.color)
+            }
+            .padding(.bottom, 18)
+        }
     }
 
     // MARK: - Sections

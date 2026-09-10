@@ -367,6 +367,17 @@ toggles, and End Routine. The routine-end toggle from Run 14 went away — the e
 - Both chips carry the same dashed border now; the AUTO / MANUAL capsule is the only auto-next signal.
 - Third App Intent: Open Today.
 
+### Run 19 — The schedule tape (2026-09-09)
+
+- **`ScheduleTapeView` in the run sheet**: the whole routine as a horizontal tape where width is duration,
+  scrubbed under a fixed playhead, clock ruler underneath, readout reporting clock time / `IN n MIN` /
+  step / end. Opens on now; `NOW` pill returns to it. Picked from four mockups of the mechanic.
+- **`ProjectedStep.project(...)`** (`ProjectedSchedule.swift`) lays the run out on the clock — backwards
+  through what happened, forwards through what is left, results matched by id. Six new tests, 95 in total.
+- Three SwiftUI traps documented in CLAUDE.md: viewport width must come from a GeometryReader, the scroll
+  offset must be read with `onChange` rather than a preference, and `.id()` must precede `.padding()` on a
+  `scrollTo` anchor.
+
 ### Later (next)
 17. iCloud sync via SwiftData + CloudKit (decide **before** run 2: CloudKit requires all properties to have defaults and all relationships optional, which constrains the `RoutineSession` design).
 18. Multiple routines / profiles if "our routine" means more than one person.
