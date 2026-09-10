@@ -96,7 +96,7 @@ xcodebuild -scheme RISE_RoutineTimer -destination 'platform=iOS Simulator,name=i
 
 The Xcode project uses synchronized buildable folders, so new `.swift` files dropped into `RISE_RoutineTimer/` or `RISE_RoutineTimerTests/` are picked up with no pbxproj surgery.
 
-**Sample data:** in a DEBUG build, the Routine tab's ⋯ menu has *Seed Sample History* (13 days that gradually improve, with 2 missed days) and *Clear All History*. Use it rather than waiting two weeks to see the charts, baselines, budgets and streak logic.
+**Sample data:** in a DEBUG build, the Settings tab's *Developer* section has *Seed Sample History* (13 days that gradually improve, with 2 missed days) and *Clear All History*. Use it rather than waiting two weeks to see the charts, baselines, budgets and streak logic.
 
 ## Key architecture notes
 
@@ -176,7 +176,7 @@ The Xcode project uses synchronized buildable folders, so new `.swift` files dro
 
 - `MorningLog` stores **only** the wake time — the one thing the timer cannot work out for itself. Routine start/end come from `RoutineSession`. `MorningRecord.join(logs:sessions:)` merges them into one record per day (earliest run wins, so an evening run doesn't overwrite the morning).
 - `MorningMetrics` does all the math and is a direct port of MorningCheckin's `metrics.js`. Weekly budgets count **overruns only** — being up early doesn't earn credit toward a later lie-in. Missed days never count today.
-- Settings (`targetWakeMinutes`, snooze/activation budgets) live in `@AppStorage` via `MorningSettings`, edited in the Routine tab's *Morning goal* section.
+- Settings (`targetWakeMinutes`, snooze/activation budgets) live in `@AppStorage` via `MorningSettings`, edited in the Settings tab's *Morning goal* section.
 
 ### Navigation
 
@@ -215,7 +215,9 @@ The Xcode project uses synchronized buildable folders, so new `.swift` files dro
 
 ### Open
 
-**Routine-level progress bar on the active screen** *(deferred)* — the PACE / DONE / SPARE micro-stats plus the rising fill cover the intent. Revisit only if a visual bar is still wanted; `activeElapsedSeconds`, `plannedTotalSeconds` and `projectedEndDate` have the math.
+**A step's "can be interrupted" flag** — the schedule tape will happily offer you a break at a moment you are mid-shower. One switch per step in the editor, defaulting to interruptible, plus a bracket drawn over any run of steps that is not, would let the sheet answer "I need ten minutes" with a moment you can actually take. Mocked up and deliberately not built yet.
+
+**Estimating by history rather than by plan** — `RoutineStats.history(forStepID:)` already knows what each step really takes. The tape projects by plan; the two agree until the long manual steps and then drift a few minutes. The plan is what you decided and the average is a second opinion, so the likely answer is to mark the rows that disagree rather than to re-project everything.
 
 **Smaller, known gaps** — negative activation (a wake logged after the routine started) reports "—" rather than prompting a fix; the Today timeline is not scrubbable, unlike the web app's "touch to explore"; Today does not surface per-step suggestions.
 
@@ -226,5 +228,8 @@ The Xcode project uses synchronized buildable folders, so new `.swift` files dro
 - **Run 3** — finish-by target (`TargetSchedule`) with an optional start-by reminder, emoji step icons, editor delete/duplicate, empty-title guard, restore-starter-routine.
 - **Run 4** — the active screen rebuilt around the coloured pace-driven inverting fill, plus the whole morning-accountability layer: wake logging, `MorningMetrics`, the Today landing tab, and Swift Charts in History.
 - **Run 5** — active-screen feedback pass: per-step fill colour, the auto-next / overtime status pill, the pause overlay, the branded `ReceiptDialog`, a user-selectable `FillTheme`, and the searchable glyph picker.
+- **Runs 6–16** — the active screen's long redesign: the Arc-style bottom bar and `RunSheetView`, skip / defer, notes editable mid-run, light mode only, the dot-matrix app icon, the Today tab's undo, and the Run tab becoming the place the routine is edited.
 - **Run 17** — screen-awake app-wide, boxed run-sheet sections, and the Live Activity (widget extension target, Lock Screen banner + Dynamic Island; see "Live Activity" above for its one real limitation).
+- **Run 18** — `StepEditorView` edits a draft and saves only on confirm; the Run tab's list edits by selection, with swipe-to-delete and a gated drag-reorder; `StepStatsSheet`; chimes / voice moved to Settings; App Intents (Start Morning Routine, I'm Awake, Open Today) with an App Shortcuts provider.
+- **Run 19** — the schedule tape: `ProjectedSchedule` lays the run out on the clock, `ScheduleTapeView` makes it scrubbable with width as duration.
 - Smaller ones: new step opens its editor immediately (`NavigationPath`); notes shown on demand via a sheet from the active screen's notes chip; Back/Reset/Skip removed from the Run idle screen.
