@@ -20,6 +20,8 @@ struct HistoryView: View {
     let steps: [RoutineStep]
 
     @State private var appliedSuggestionIDs: Set<UUID> = []
+    /// A past session opened in the same summary sheet shown when a run ends.
+    @State private var viewingSession: SessionResult?
 
     private var stats: RoutineStats {
         RoutineStats(sessions: sessions.map(\.result))
@@ -55,6 +57,9 @@ struct HistoryView: View {
                 }
             }
             .navigationTitle("History")
+            .sheet(item: $viewingSession) { result in
+                SessionSummaryView(result: result, context: .history)
+            }
         }
     }
 
@@ -99,7 +104,13 @@ struct HistoryView: View {
     private var sessionsSection: some View {
         Section("Sessions") {
             ForEach(sessions) { session in
-                SessionRow(session: session)
+                Button {
+                    viewingSession = session.result
+                } label: {
+                    SessionRow(session: session)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             .onDelete(perform: deleteSessions)
         }
@@ -218,7 +229,7 @@ private struct SessionRow: View {
                 Text(Self.dayFormatter.string(from: session.startedAt))
                     .font(.subheadline)
                 HStack(spacing: 8) {
-                    Text("Started \(TimeFormatting.shortClockTime(from: session.startedAt))")
+                    Text(TimeFormatting.clockRange(from: session.startedAt, to: session.endedAt))
                     if !session.completed {
                         Text("ENDED EARLY")
                             .font(.system(size: 10, weight: .semibold))
@@ -240,6 +251,10 @@ private struct SessionRow: View {
                     .tracking(1)
                     .foregroundStyle(.secondary)
             }
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] }
         }
         .padding(.vertical, 4)
     }

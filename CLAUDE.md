@@ -32,6 +32,7 @@ RISE_RoutineTimer/
   RoutineEngine.swift           – @Observable timer engine; all time math; persists the run via RunStore
   RoutineStats.swift            – stats over sessions: averages, streak, trend, per-step suggestions + StepHistory
   ProjectedSchedule.swift       – where every step of the run sits on the clock (ProjectedStep)
+  SessionBreakdown.swift        – how each step of a finished run went: over / under / on plan / cut short / skipped / auto
   MorningMetrics.swift          – snooze / activation / duration, baselines, spread, budgets, missed days, insights
   TargetSchedule.swift          – finish-by target math: start-by time, spare time, reminder components
   RoutinePace.swift             – FillTheme palette, per-step StepPace, cumulative pace label
@@ -55,7 +56,7 @@ RISE_RoutineTimer/
   ReceiptUI.swift               – shared receipt controls: buttons, switches, sheet chrome
   GlyphPickerView.swift         – searchable icon picker sheet
   GlyphCatalog.swift            – the curated glyph/emoji set and its keywords
-  SessionSummaryView.swift      – sheet shown when a routine completes
+  SessionSummaryView.swift      – step-by-step summary: shown when a run ends, and from any session in History
   RoutineListView.swift         – full step list (reorder / delete / restore), presented from Settings
   StepStatsSheet.swift          – one step's plan and recent record, from the arrow on a selected Run-tab row
   SettingsView.swift            – "Settings" tab: timer appearance, morning goal, target, DEBUG tools
@@ -81,6 +82,7 @@ RISE_RoutineTimerTests/
   RoutineEngineTests.swift      – engine time math driven with synthetic dates
   RoutineStatsTests.swift       – stats and suggestion tests
   ProjectedScheduleTests.swift  – laying the run out on the clock, forwards and backwards
+  SessionBreakdownTests.swift   – step outcomes, auto-run folding, pace that ignores steps that barely happened
   MorningMetricsTests.swift     – snooze / activation / baselines / spread / budgets / missed days / streak
   StepPaceTests.swift           – per-step pace colours, theme/overtime separation, glyph catalog
   TargetScheduleTests.swift     – target/start-by tests
@@ -92,7 +94,7 @@ RISE_RoutineTimerTests/
 xcodebuild -scheme RISE_RoutineTimer -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
-95 tests — mostly pure value-type math against synthetic dates; the suite runs in well under a second. The build should be warning-free; keep it that way.
+100 tests — mostly pure value-type math against synthetic dates; the suite runs in well under a second. The build should be warning-free; keep it that way.
 
 The Xcode project uses synchronized buildable folders, so new `.swift` files dropped into `RISE_RoutineTimer/` or `RISE_RoutineTimerTests/` are picked up with no pbxproj surgery.
 
@@ -114,7 +116,7 @@ The Xcode project uses synchronized buildable folders, so new `.swift` files dro
 - **All timer logic lives in `RoutineEngine`**, never in views. When a run starts the steps are frozen into `[RunStep]`, so editing the routine mid-run cannot corrupt it. Every value the UI shows is derived from `run` + `now`.
 - The engine emits `Event`s (`stepStarted`, `overtimeStarted`, `completed`, …) that `RoutineAlertCoordinator` turns into feedback and `SessionRecorder` turns into history.
 - **The screen stays on while a routine is running, app-wide.** `RISE_RoutineTimerApp.syncIdleTimer()` sets `UIApplication.shared.isIdleTimerDisabled = engine.hasActiveRun && scenePhase == .active`, driven by both values. It used to live on the Run tab and switched itself off in `onDisappear`, so glancing at Today mid-routine let the phone sleep.
-- The run is saved by `FileRunStore` (an atomic JSON file in Application Support) after every mutation and restored at launch (running runs catch up on wall-clock time; runs older than 12 h are dropped). Pauses are tracked separately so the real start time never shifts.
+- The run is saved by `FileRunStore` (an atomic JSON file in Application Support) after every mutation and restored at launch (running runs catch up on wall-clock time; runs older than 12 h are dropped, and so is a *completed* run — COMPLETE exists only in the session the run finished in, so a relaunch always lands on READY. To test anything in the completed state, finish a run live: write one paused on its last step, resume, check). Pauses are tracked separately so the real start time never shifts.
 - `scheduleDeltaSeconds` (positive = behind) and `projectedEndDate` are the ahead/behind signals. `plannedAlerts(at:)` is the single source of truth for what notifications get scheduled.
 
 ### Active screen
@@ -170,6 +172,15 @@ The Xcode project uses synchronized buildable folders, so new `.swift` files dro
 - `RoutineActivityAttributes.swift` lives in the widget folder but is compiled into **both** targets via a `PBXFileSystemSynchronizedBuildFileExceptionSet` on the app target (the folder is a synchronized root group; the exception set is how one file joins a second target). The widget cannot import the app, so `RoutineLiveActivity.swift` carries its own copies of `analogFont`, the `FillTheme` hex table and the short clock format — **keep those in step with `FontHelpers` / `RoutinePace`**. The widget registers `Fake Receipt.otf` itself in `Widget.init()`; fonts registered by the app are not visible to the extension process.
 - The extension is embedded by an "Embed Foundation Extensions" copy phase; the app's Info.plist gets `NSSupportsLiveActivities` via `INFOPLIST_KEY_NSSupportsLiveActivities`. In the expanded island the leading region is declared with `priority: 1` so it gets the leftover width and titles are not squeezed to "DRINK WA…"; a `frame(maxWidth: .infinity)` on that region instead makes the trailing and bottom regions disappear entirely.
 
+### Session summary
+
+- **Each step is measured against its own plan**, not the clock: the bar is its share of plan over or under on a ±100% scale (`StepResult.shareOfPlan`), so a five-minute step and a one-minute step sit on the same footing and nothing ever needs clipping. Names sit in a fixed left column; the time the step actually took is the number on the right with the percentage small beneath it, and **tapping a row swaps that percentage for the time over or under**. Over is the amber the fill turns when a step runs long; under is the user's theme colour.
+- **A step that barely happened is not a quick step.** `StepOutcome` classes a step checked off before a quarter of its plan as `cutShort` (and a skipped one as `skipped`), draws both as a grey hatch, and leaves them out of the header's pace number. The summary this replaced said "17:28 ahead" for a run where 17:08 of that was three steps checked off in under 35 seconds and the other twelve came in 20 seconds *under* — `SessionBreakdownTests.testPaceLeavesOutStepsThatBarelyHappened` is that exact run. Within ±3 s of plan is on plan. A step only counts as `auto` if it was auto-advanced *and* ran to plan — the engine makes those the same thing, but the DEBUG seed history shrinks auto steps, and trusting the flag there drew an on-plan pin beside a −41%.
+- The header leads with **when** the run happened — a `1:13 – 1:39 PM` range — then how long it took, then the pace of the steps that ran normally with a `3 CUT SHORT` chip beside it. The start–end range is the point: it is what you line up against the rest of the morning. History's session rows show the same range instead of "Started 1:47pm".
+- **Tapping a session in History opens the same sheet** (`context: .history`), which only drops the average / best / streak comparison line — that line is about the run you just finished. Two or more auto steps in a row fold into one row; a lone auto step keeps its own.
+- It is a brand sheet with no `NavigationStack`: the old version's large total slid up underneath the navigation title. Step results carry no icon, so glyphs are looked up from the routine by `stepID`; a step deleted since the run simply goes without.
+- Five mockup rounds led here (design notes 03–05). Rejected on the way: a diverging chart in seconds (three outliers clipped to identical bars and flattened the rest), labels on whichever side of the axis was empty (no column to scan), and painting cut-short steps in the "under" colour (the exact confusion this exists to fix).
+
 ### Morning accountability
 
 - "I'm awake" can be undone from the Today tab while the routine has not started — one accidental tap otherwise skews the whole morning's snooze and activation numbers. It confirms through `ReceiptDialog`.
@@ -180,7 +191,7 @@ The Xcode project uses synchronized buildable folders, so new `.swift` files dro
 
 ### Navigation
 
-- **The Run tab's idle list edits by selection.** Tapping a step selects it: the row highlights, the connector above and below it grows a `+` (`InsertConnector`, which is otherwise a plain line — the first and last rows get a connector conjured just for this), and a pencil and an arrow appear at its right. Pencil opens `StepEditorView`; arrow opens `StepStatsSheet`; a `+` inserts a step at exactly that point. Tapping the row again deselects. An always-on `+` between every pair of rows and a pencil in the toolbar were tried first and read as clutter on what should be a quiet pre-flight list. An `ADD STEP` row still appends. Only while `engine.run == nil` — a finished run shows the frozen order, which may differ from the saved one after a move-to-end.
+- **The Run tab's idle list edits by selection.** Tapping a step selects it: the row highlights, the connector above and below it grows a `+` (`InsertConnector`, which is otherwise a plain line — the first and last rows get a connector conjured just for this), and a pencil and an arrow appear at its right. Pencil opens `StepEditorView`; arrow opens `StepStatsSheet`; a `+` inserts a step at exactly that point. Tapping the row again deselects. An always-on `+` between every pair of rows and a pencil in the toolbar were tried first and read as clutter on what should be a quiet pre-flight list. An `ADD STEP` row still appends. Editable with no run **and after a run completes** (`isShowingSavedRoutine`) — it used to lock until Start Over, so right after running the routine, when you know what to change, was the one moment you couldn't. Only a *paused* run shows the frozen order with ticks, since that order may differ from the saved one after a move-to-end.
 - **The idle list is a plain `List`**, not a ScrollView, so rows can be swiped away (`swipeActions`; the swipe only raises a `ReceiptDialog`, and the row goes when that is confirmed — an accidental full swipe on the morning list is too cheap to be irreversible) and dragged into a new order (`onMove`, long-press drag; no edit mode). Each row owns the connector beneath it, so a drag moves the step and its line together. Row insets are 14pt with 10pt inside the row, so text sits at the 24pt margin and the selection highlight reaches 10pt past it — the earlier negative-padding trick would be clipped by the cell.
 - **A drag-reorder is a proposal until Save, and it locks the screen.** `moveSteps` writes only `pendingOrder: [UUID]?`; the list draws that order, and Cancel / Save Order replace the Start button while it differs from the saved one. While it is pending the tab bar is hidden (`.toolbar(.hidden, for: .tabBar)`, the same modifier a running routine uses) and `editable` is false, so no row can be selected, swiped, edited, opened for stats or added to — the only two ways out are the two buttons. `insertStep` is still written against the *saved* order and patches `pendingOrder` too, for the day something else needs to insert mid-drag.
 - The toolbar is empty now: the pencil went (rows edit themselves) and the chime / voice speaker menu moved to Settings › Alerts. `RoutineListView` (duplicate, restore starter, and the same reorder / delete in system form) is still reachable from Settings › Routine › Full Step List for the occasional job.
@@ -208,6 +219,7 @@ The Xcode project uses synchronized buildable folders, so new `.swift` files dro
 - The project sets `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`; pure value types and pure static functions are marked `nonisolated`. `TimeFormatting`'s string maths is `nonisolated`, but `shortClockTime(from:)` stays isolated because it shares a `DateFormatter`.
 - `analogFont()` / `digitFont()` from `FontHelpers.swift` are the "Fake Receipt" face. Tracked all-caps at 9–11pt is the micro-label register.
 - Confirmations shown **over the timer** use `.receiptDialog(...)` (`ReceiptDialog`), not `.confirmationDialog` — a stack of system grey capsules over the full-bleed coloured screen looked like another app had taken over. Dialogs inside the Form-based settings surfaces still use the system sheet, which is idiomatic there.
+- **Don't hand a SwiftData model straight to `.sheet(item:)`.** Wrap it in a small `Identifiable` struct whose `id` is `step.persistentModelID` (`StepEditRequest`, `StepStatsRequest`). The model's macro-generated `Identifiable` conformance was not reliably visible there: a clean device build failed with "requires that 'RoutineStep' conform to 'Identifiable'" while an incremental simulator build of the same code passed.
 - Step icons come from `GlyphCatalog` via `GlyphPickerView`. The catalog is curated, not the full emoji set, and every entry carries search keywords. Adding one: keep it a single grapheme, or `StepPaceTests.testEveryGlyphSurvivesNormalisation` will fail against `RoutineStep.normalizedIcon`.
 - **Add unit tests for any change to the engine, stats, metrics or schedule math.** They are pure, they run in milliseconds, and they are the reason this codebase can be refactored confidently.
 

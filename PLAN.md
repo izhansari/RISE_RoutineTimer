@@ -378,6 +378,32 @@ toggles, and End Routine. The routine-end toggle from Run 14 went away — the e
   offset must be read with `onChange` rather than a preference, and `.id()` must precede `.padding()` on a
   `scrollTo` anchor.
 
+### Run 20 — Editing after a finished run; summary redesign mockups (2026-09-10)
+
+- **The routine is editable once a run completes.** The Run tab's list locked until Start Over, so the moment
+  right after running the routine — when you know what to change — was the one moment you couldn't.
+  `isShowingSavedRoutine` (no run, or a complete one) now drives the list, selection, swipe-delete and reorder;
+  only a paused run still shows its frozen copy with ticks.
+- **Session summary: four mockups** (design note 03), drawn from the real 1:13 PM run on 10 Sep. The old summary
+  said "17:28 ahead"; 17:08 of that was three steps checked off in under 35 s (Coffee, Dua, Drink Water) and the
+  other twelve ran 0:20 under. Proposed: classify every step as over / under / on plan / cut short (< 25% of
+  plan) / auto, lead with a diverging plan-line chart, bucket the rows, and keep cut-short samples out of the
+  averages. Not built yet.
+
+### Run 21 — Session summary rebuilt (2026-09-11)
+
+- **`SessionSummaryView` is the chosen design (note 05, option 2):** names in a left column, a share-of-plan bar
+  (±100%), the time taken on the right with the percentage beneath; tapping a row swaps the percentage for time
+  over / under. Header leads with the start–end clock range, then time taken, then pace of the steps that ran
+  normally with a cut-short chip. Brand sheet, no navigation bar (the old total collided with the title).
+- **`SessionBreakdown` / `StepOutcome`** classify steps as over / under / on plan / cut short (< 25% of plan) /
+  skipped / auto, fold runs of auto steps, and compute pace without the steps that barely happened. Five new tests
+  (100 total), one of them the real 10 Sep run that reported "17:28 ahead" for 0:20 of actual pace.
+- **History sessions open the same sheet**; the rows show the start–end range and a chevron.
+- The step stats sheet is presented through `StepStatsRequest` — a clean device build rejected `.sheet(item:)` on
+  the model itself.
+- Not done yet: keeping cut-short samples out of `RoutineStats` averages and suggestions.
+
 ### Later (next)
 17. iCloud sync via SwiftData + CloudKit (decide **before** run 2: CloudKit requires all properties to have defaults and all relationships optional, which constrains the `RoutineSession` design).
 18. Multiple routines / profiles if "our routine" means more than one person.

@@ -38,7 +38,7 @@ struct RoutineTimerView: View {
     /// second tap puts them away. Cleared when a run starts.
     @State private var selectedStepID: UUID?
     /// A step whose stats sheet is up (the arrow on a selected row).
-    @State private var statsStep: RoutineStep?
+    @State private var statsRequest: StepStatsRequest?
     /// A drag-reorder in progress: the step ids in their dragged order. The
     /// list shows this order, but nothing is written until Save — a Cancel /
     /// Save pair replaces the Start button while it is set, so an accidental
@@ -75,8 +75,8 @@ struct RoutineTimerView: View {
             // While a reorder is pending the tab bar goes too: the only ways
             // out of the proposal are Cancel and Save Order.
             .toolbar(engine.hasActiveRun || hasPendingOrder ? .hidden : .visible, for: .tabBar)
-            .sheet(item: $statsStep) { step in
-                StepStatsSheet(step: step, stats: RoutineStats(sessions: sessions.map(\.result)))
+            .sheet(item: $statsRequest) { request in
+                StepStatsSheet(step: request.step, stats: RoutineStats(sessions: sessions.map(\.result)))
             }
         }
         .onChange(of: engine.isComplete) { wasComplete, isComplete in
@@ -119,10 +119,17 @@ struct RoutineTimerView: View {
 
     // MARK: - Idle Screen
 
-    /// While a run exists, the list mirrors the run's frozen steps so edits
-    /// made mid-routine don't shuffle the checkmarks.
+    /// Whether the list is the saved routine, open for editing. True with no
+    /// run *and* once a run has finished: a completed run has nothing left to
+    /// protect, and locking the routine until "Start Over" was pressed meant
+    /// the moment you had just run it — when you know what to change — was
+    /// the one moment you couldn't.
+    private var isShowingSavedRoutine: Bool { engine.run == nil || engine.isComplete }
+
+    /// A paused run mirrors its frozen steps so edits made mid-routine don't
+    /// shuffle the checkmarks. Otherwise this is the saved routine.
     private var displayedSteps: [RunStep] {
-        engine.run == nil ? orderedSteps.map(RunStep.init) : engine.steps
+        isShowingSavedRoutine ? orderedSteps.map(RunStep.init) : engine.steps
     }
 
     /// The saved steps in the pending drag order, or the saved order.
@@ -146,7 +153,7 @@ struct RoutineTimerView: View {
         let rows = displayedSteps
         // A pending reorder locks everything but the drag itself: no
         // selection (so no edit, stats or insert), no swipe-delete, no Add.
-        let editable = engine.run == nil && !hasPendingOrder
+        let editable = isShowingSavedRoutine && !hasPendingOrder
         let selected = editable ? selectedStepID : nil
 
         return VStack(spacing: 0) {
@@ -163,8 +170,8 @@ struct RoutineTimerView: View {
                 // appears on the connector above and below it, and edit /
                 // stats buttons sit at its right. Nothing else on the list
                 // carries chrome, so a resting routine is just the steps.
-                // Only while no run exists: a finished run shows the frozen
-                // order, which may differ from the saved one.
+                // Only on the saved routine — never on a paused run's frozen
+                // copy, whose order may differ after a move-to-end.
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, step in
                     let isSelected = selected == step.id
 
@@ -176,9 +183,16 @@ struct RoutineTimerView: View {
                         IdleStepRow(
                             step: step,
                             index: index,
-                            currentIndex: engine.currentIndex,
-                            isRoutineComplete: engine.isComplete,
-                            isRoutineActive: engine.run != nil,
+                            // On the saved routine the "up next" ring belongs
+                            // to the first step, as it does on READY — a
+                            // finished run's last position would ring a
+                            // step at random.
+                            currentIndex: isShowingSavedRoutine ? 0 : engine.currentIndex,
+                            // The saved routine is drawn plain even after a
+                            // finished run: every row greyed out with a tick
+                            // read as "locked", which is what it used to be.
+                            isRoutineComplete: false,
+                            isRoutineActive: !isShowingSavedRoutine,
                             isSelected: isSelected,
                             onEdit: {
                                 guard let live = liveStep(for: step) else { return }
@@ -186,7 +200,7 @@ struct RoutineTimerView: View {
                             },
                             onStats: {
                                 guard let live = liveStep(for: step) else { return }
-                                statsStep = live
+                                statsRequest = StepStatsRequest(step: live)
                             }
                         )
                         .contentShape(Rectangle())
@@ -217,7 +231,7 @@ struct RoutineTimerView: View {
                             }
                         }
                     }
-                    .moveDisabled(engine.run != nil)
+                    .moveDisabled(!isShowingSavedRoutine)
                 }
                 .onMove(perform: moveSteps)
 
@@ -688,4 +702,14 @@ private struct InsertConnector: View {
 private struct NotesRequest: Identifiable {
     let id = UUID()
     let editing: Bool
+}
+
+/// Presents the step stats sheet. Wrapping the model with an explicit id,
+/// rather than handing `.sheet(item:)` the `RoutineStep` itself, is the same
+/// move as `StepEditRequest`: the model's macro-generated `Identifiable`
+/// conformance was not reliably visible to `.sheet(item:)` — a clean device
+/// build failed on it while an incremental simulator build passed.
+private struct StepStatsRequest: Identifiable {
+    let step: RoutineStep
+    var id: PersistentIdentifier { step.persistentModelID }
 }
