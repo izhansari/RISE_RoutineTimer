@@ -120,3 +120,29 @@ nonisolated struct SessionBreakdown: Equatable {
         barelyHappenedDeltaSeconds = barely.reduce(0) { $0 + $1.deltaSeconds }
     }
 }
+
+// MARK: - Correcting a past run
+
+extension SessionResult {
+    /// The same run with one step's time corrected — for the morning you forgot
+    /// to tap done and the last step "ran" for two hours.
+    ///
+    /// Everything downstream of that time moves with it: the run's active time
+    /// changes by the difference, and so does its end, so the start–end range,
+    /// the Today tab's routine end and every average read the corrected run.
+    /// The start never moves — it was recorded correctly. A step fixed by hand
+    /// is no longer "auto-advanced", since its time is no longer the plan's.
+    nonisolated func correcting(stepAt index: Int, toSeconds seconds: Int) -> SessionResult {
+        guard steps.indices.contains(index) else { return self }
+        let newSeconds = max(0, seconds)
+        let delta = newSeconds - steps[index].actualSeconds
+        guard delta != 0 else { return self }
+
+        var corrected = self
+        corrected.steps[index].actualSeconds = newSeconds
+        corrected.steps[index].autoAdvanced = false
+        corrected.activeSeconds = max(0, activeSeconds + delta)
+        corrected.endedAt = max(startedAt, endedAt.addingTimeInterval(TimeInterval(delta)))
+        return corrected
+    }
+}

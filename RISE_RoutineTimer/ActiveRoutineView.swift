@@ -403,14 +403,15 @@ struct ActiveRoutineView: View {
             .frame(height: progressEdgeHeight)
             .accessibilityLabel("Routine \(Int(engine.routinePlanProgress * 100)) percent through")
 
+            // Left to right: chevron · DONE AT · notes, pause. Pause sits at
+            // the right edge, under the thumb of a right hand, because it is
+            // the one control with time pressure.
             HStack(spacing: 0) {
-                barButton("pause.fill", label: "Pause routine") { engine.pause() }
-                // Only when there is a note: the icon is the signal that this
-                // step has one, as much as the way to open it. A clear slot on
-                // the right keeps the centre label centred.
+                barButton("chevron.up", label: "Run details") { showingRunSheet = true }
                 if hasNotes {
-                    barButton("note.text", label: "Show this step's notes", width: 40) { onShowNotes(false) }
-                        .padding(.leading, -14)
+                    // Balances notes + pause (40 + 52 − 14) so the centre
+                    // label stays centred.
+                    Color.clear.frame(width: 26, height: barHeight - progressEdgeHeight)
                 }
 
                 Spacer(minLength: 0)
@@ -436,12 +437,13 @@ struct ActiveRoutineView: View {
 
                 Spacer(minLength: 0)
 
+                // Only when there is a note: the icon is the signal that this
+                // step has one, as much as the way to open it.
                 if hasNotes {
-                    // Balances pause + notes (52 + 40 − 14) so the centre
-                    // label stays centred.
-                    Color.clear.frame(width: 26, height: barHeight - progressEdgeHeight)
+                    barButton("note.text", label: "Show this step's notes", width: 40) { onShowNotes(false) }
+                        .padding(.trailing, -14)
                 }
-                barButton("chevron.up", label: "Run details") { showingRunSheet = true }
+                barButton("pause.fill", label: "Pause routine") { engine.pause() }
             }
             .frame(height: barHeight - progressEdgeHeight)
         }

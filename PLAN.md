@@ -404,6 +404,15 @@ toggles, and End Routine. The routine-end toggle from Run 14 went away — the e
   the model itself.
 - Not done yet: keeping cut-short samples out of `RoutineStats` averages and suggestions.
 
+### Run 22 — Step history, glyphs, header (2026-09-13)
+
+- **Bottom bar reordered:** chevron · DONE AT · notes · pause.
+- **Run tab header:** no "READY"; the streak is a top-right toolbar badge that opens History.
+- **Glyph catalog grown from 97 to 356** in 14 categories, including Faith, Numbers, Colour, Wash and Dress.
+- **Session summary:** the time-over/under swap rolls in and reverts after five seconds; tapping a step's name
+  pushes **`StepHistoryView`** — typical vs plan with a verdict and trend, every run as bars against the plan and
+  usual band, a 3×2 facts grid, the suggestion, recent runs. **`StepReport`** is the maths, with seven tests (107).
+
 ### Later (next)
 17. iCloud sync via SwiftData + CloudKit (decide **before** run 2: CloudKit requires all properties to have defaults and all relationships optional, which constrains the `RoutineSession` design).
 18. Multiple routines / profiles if "our routine" means more than one person.

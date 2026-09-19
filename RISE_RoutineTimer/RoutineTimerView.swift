@@ -13,6 +13,7 @@ import UIKit
 struct RoutineTimerView: View {
     @Environment(RoutineEngine.self) private var engine
     @Environment(\.modelContext) private var modelContext
+    @Environment(AppNavigation.self) private var navigation
     @AppStorage(TargetSchedule.targetKey) private var targetMinutes = TargetSchedule.none
     @AppStorage(FillTheme.storageKey) private var fillThemeRaw = FillTheme.default.rawValue
 
@@ -75,6 +76,11 @@ struct RoutineTimerView: View {
             // While a reorder is pending the tab bar goes too: the only ways
             // out of the proposal are Cancel and Save Order.
             .toolbar(engine.hasActiveRun || hasPendingOrder ? .hidden : .visible, for: .tabBar)
+            .toolbar {
+                if streak >= 2 {
+                    ToolbarItem(placement: .topBarTrailing) { streakBadge }
+                }
+            }
             .sheet(item: $statsRequest) { request in
                 StepStatsSheet(step: request.step, stats: RoutineStats(sessions: sessions.map(\.result)))
             }
@@ -297,18 +303,14 @@ struct RoutineTimerView: View {
         }
     }
 
+    /// No status label: "READY" said nothing the Start button doesn't, so the
+    /// planned length leads on its own. A finished run says so in the line
+    /// underneath instead.
     private var idleHeader: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(idleStatusLabel)
-                    .font(.system(size: 12, weight: .semibold))
-                    .tracking(2.5)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(idleHeadlineTime)
-                    .font(analogFont(30))
-            }
-            .padding(.top, 20)
+            Text(idleHeadlineTime)
+                .font(analogFont(30))
+                .padding(.top, 20)
             .padding(.bottom, (idleSummaryLine ?? readyContextLine) == nil ? 20 : 6)
 
             if let line = idleSummaryLine ?? readyContextLine {
@@ -420,12 +422,6 @@ struct RoutineTimerView: View {
         editingStep = StepEditRequest(step: step, isNew: true)
     }
 
-    private var idleStatusLabel: String {
-        if engine.isComplete { return "COMPLETE" }
-        if engine.isPaused { return "PAUSED" }
-        return "READY"
-    }
-
     private var idleHeadlineTime: String {
         if engine.isComplete {
             return TimeFormatting.clockTime(from: engine.activeElapsedSeconds)
@@ -441,7 +437,7 @@ struct RoutineTimerView: View {
         let started = "Started \(TimeFormatting.shortClockTime(from: start))"
         if engine.isComplete {
             let delta = TimeFormatting.scheduleDeltaText(from: engine.scheduleDeltaSeconds)
-            return "\(started) · \(delta.lowercased())"
+            return "Complete · \(started.lowercased()) · \(delta.lowercased())"
         }
         if engine.isPaused {
             return "\(started) · step \(engine.currentIndex + 1) of \(engine.steps.count)"
@@ -473,9 +469,38 @@ struct RoutineTimerView: View {
             let clock = Calendar.current.startOfDay(for: Date()).addingTimeInterval(TimeInterval(average))
             parts.append("usually start \(TimeFormatting.shortClockTime(from: clock))")
         }
-        let streak = stats.currentStreak()
-        if streak >= 2 { parts.append("\(streak) day streak") }
         return parts.joined(separator: " · ")
+    }
+
+    // MARK: - Streak
+
+    private var streak: Int {
+        RoutineStats(sessions: sessions.map(\.result)).currentStreak()
+    }
+
+    /// The streak's own place: top right, where the eye lands on the Run tab,
+    /// and one tap from the History it is counted from. It was the tail end of
+    /// the context line under the planned time, wrapping onto a second line.
+    private var streakBadge: some View {
+        Button {
+            navigation.selectedTab = .history
+        } label: {
+            HStack(alignment: .center, spacing: 6) {
+                Text("\(streak)")
+                    .font(analogFont(18))
+                    .monospacedDigit()
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("DAY")
+                    Text("STREAK")
+                }
+                .font(.system(size: 7.5, weight: .semibold))
+                .tracking(1.2)
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 4)
+        }
+        .accessibilityLabel("\(streak) day streak")
+        .accessibilityHint("Opens History")
     }
 
     private var primaryButtonTitle: String {

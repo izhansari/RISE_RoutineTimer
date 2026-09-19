@@ -27,11 +27,33 @@ struct SessionSummaryView: View {
     @Query private var routineSteps: [RoutineStep]
     @AppStorage(FillTheme.storageKey) private var fillThemeRaw = FillTheme.default.rawValue
 
-    let result: SessionResult
+    private let initialResult: SessionResult
     var context: Context = .justFinished
+
+    init(result: SessionResult, context: Context = .justFinished) {
+        self.initialResult = result
+        self.context = context
+    }
+
+    /// The saved session this summary shows, matched by its start time — the
+    /// run's identity, which a correction never changes. Reading through it
+    /// means an edit shows up here the moment it is saved.
+    private var storedSession: RoutineSession? {
+        sessions.first { $0.startedAt == initialResult.startedAt }
+    }
+
+    private var result: SessionResult { storedSession?.result ?? initialResult }
+
+    /// Correcting times happens on its own screen, pushed from EDIT.
+    @State private var isEditing = false
 
     /// Rows showing time over / under instead of share of plan.
     @State private var flipped: Set<Int> = []
+    /// One token per flipped row, so a row tapped again (or re-flipped) isn't
+    /// reverted by an older timer.
+    @State private var flipTokens: [Int: UUID] = [:]
+    /// A step's history, pushed from its name.
+    @State private var historyRequest: StepHistoryRequest?
 
     /// Wide enough for "TOWEL / MOUTHWASH" in the receipt face; the bar
     /// gets what is left, which is still plenty for a ±100% scale.
@@ -51,49 +73,62 @@ struct SessionSummaryView: View {
     var body: some View {
         let breakdown = breakdown
 
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                topBar
-                    .padding(.top, 20)
-                timeRange
-                    .padding(.top, 12)
-                hero(breakdown)
-                    .padding(.top, 16)
-                    .padding(.bottom, 14)
+        // A navigation stack so a step's name can push its history. The bar
+        // stays hidden here — the summary's own header is the chrome, and the
+        // system bar is what the old total used to slide under.
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    topBar
+                        .padding(.top, 20)
+                    timeRange
+                        .padding(.top, 12)
+                    hero(breakdown)
+                        .padding(.top, 16)
+                        .padding(.bottom, 14)
 
-                ReceiptRule()
+                    ReceiptRule()
 
-                axisHeader
-                    .padding(.top, 12)
-                    .padding(.bottom, 2)
+                    axisHeader
+                        .padding(.top, 12)
+                        .padding(.bottom, 2)
 
-                ForEach(breakdown.rows) { row in
-                    rowView(row)
-                    if row.id != breakdown.rows.last?.id {
-                        Rectangle()
-                            .fill(Color.primary.opacity(0.06))
-                            .frame(height: 1)
+                    ForEach(breakdown.rows) { row in
+                        rowView(row)
+                        if row.id != breakdown.rows.last?.id {
+                            Rectangle()
+                                .fill(Color.primary.opacity(0.06))
+                                .frame(height: 1)
+                        }
+                    }
+
+                    Text("TAP A ROW FOR TIME OVER OR UNDER · TAP A NAME FOR ITS HISTORY")
+                        .font(.system(size: 9, weight: .medium))
+                        .tracking(1.4)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 14)
+
+                    if context == .justFinished, let comparison {
+                        ReceiptRule()
+                            .padding(.top, 18)
+                        Text(comparison)
+                            .font(analogFont(14))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 12)
                     }
                 }
-
-                Text("TAP A STEP FOR TIME OVER OR UNDER")
-                    .font(.system(size: 9, weight: .medium))
-                    .tracking(1.4)
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 14)
-
-                if context == .justFinished, let comparison {
-                    ReceiptRule()
-                        .padding(.top, 18)
-                    Text(comparison)
-                        .font(analogFont(14))
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 12)
-                }
+                .padding(.horizontal, 22)
+                .padding(.bottom, 32)
             }
-            .padding(.horizontal, 22)
-            .padding(.bottom, 32)
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(item: $historyRequest) { request in
+                StepHistoryView(request: request)
+            }
+            .navigationDestination(isPresented: $isEditing) {
+                SessionEditView(startedAt: initialResult.startedAt)
+            }
         }
         .presentationDragIndicator(.visible)
         .presentationBackground(Color(.systemBackground))
@@ -108,6 +143,21 @@ struct SessionSummaryView: View {
                 .tracking(2)
                 .foregroundStyle(.secondary)
             Spacer()
+            if storedSession != nil {
+                Button {
+                    isEditing = true
+                } label: {
+                    Text("EDIT")
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(1.8)
+                        .foregroundStyle(.primary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Color.primary, lineWidth: 1.2))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Correct step times")
+            }
             Button { dismiss() } label: {
                 Text("DONE")
                     .font(.system(size: 11, weight: .semibold))
@@ -204,13 +254,19 @@ struct SessionSummaryView: View {
         switch row {
         case .step(_, let step, let outcome):
             HStack(spacing: 8) {
-                glyph(for: step, dimmed: outcome.barelyHappened)
-                Text(step.title.uppercased())
-                    .font(analogFont(11))
-                    .tracking(0.3)
-                    .lineLimit(1)
-                    .foregroundStyle(outcome.barelyHappened ? .secondary : .primary)
-                    .frame(width: nameWidth, alignment: .leading)
+                // The name is its own tap target: it opens the step's history,
+                // while the rest of the row flips the number.
+                HStack(spacing: 8) {
+                    glyph(for: step, dimmed: outcome.barelyHappened)
+                    Text(step.title.uppercased())
+                        .font(analogFont(11))
+                        .tracking(0.3)
+                        .lineLimit(1)
+                        .foregroundStyle(outcome.barelyHappened ? .secondary : .primary)
+                        .frame(width: nameWidth, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { openHistory(step) }
                 ShareBar(share: step.shareOfPlan, outcome: outcome, tint: tint, over: Self.overColor)
                 valueColumn(
                     took: step.actualSeconds,
@@ -224,6 +280,7 @@ struct SessionSummaryView: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(accessibilityText(step, outcome: outcome))
             .accessibilityHint("Switches between percent of plan and time over or under")
+            .accessibilityAction(named: "Step history") { openHistory(step) }
 
         case .autoRun(_, let steps):
             let took = steps.reduce(0) { $0 + $1.actualSeconds }
@@ -274,17 +331,52 @@ struct SessionSummaryView: View {
             Text(TimeFormatting.clockTime(from: took))
                 .font(analogFont(15))
                 .monospacedDigit()
-            Text(detail)
-                .font(analogFont(11))
-                .monospacedDigit()
-                .foregroundStyle(color)
+            // Keyed on its text so a swap is a transition, not a relabel: the
+            // new value rolls up into place and the old one rolls out.
+            ZStack(alignment: .trailing) {
+                Text(detail)
+                    .font(analogFont(11))
+                    .monospacedDigit()
+                    .foregroundStyle(color)
+                    .id(detail)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .bottom).combined(with: .opacity),
+                        removal: .move(edge: .top).combined(with: .opacity)
+                    ))
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .clipped()
         }
         .frame(width: valueWidth, alignment: .trailing)
     }
 
+    /// A peek, not a mode: the time rolls in, and rolls back to the
+    /// percentage by itself after five seconds. Tapping again sends it back
+    /// straight away.
     private func flip(_ id: Int) {
-        if flipped.contains(id) { flipped.remove(id) } else { flipped.insert(id) }
         UISelectionFeedbackGenerator().selectionChanged()
+        if flipped.contains(id) {
+            flipTokens[id] = nil
+            withAnimation(.snappy(duration: 0.3)) { _ = flipped.remove(id) }
+            return
+        }
+        let token = UUID()
+        flipTokens[id] = token
+        withAnimation(.snappy(duration: 0.3)) { _ = flipped.insert(id) }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(5))
+            guard flipTokens[id] == token else { return }
+            flipTokens[id] = nil
+            withAnimation(.easeInOut(duration: 0.45)) { _ = flipped.remove(id) }
+        }
+    }
+
+    private func openHistory(_ step: StepResult) {
+        historyRequest = StepHistoryRequest(
+            stepID: step.stepID,
+            title: step.title,
+            plannedSeconds: step.plannedSeconds
+        )
     }
 
     private func detailText(_ step: StepResult, outcome: StepOutcome, flipped: Bool) -> String {

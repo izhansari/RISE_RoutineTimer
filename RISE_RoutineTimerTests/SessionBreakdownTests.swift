@@ -75,4 +75,46 @@ final class SessionBreakdownTests: XCTestCase {
         XCTAssertEqual(breakdown.barelyHappenedDeltaSeconds, -1028)
         XCTAssertEqual(breakdown.rows.count, 11, "fifteen steps, the five auto steps as one row")
     }
+
+    // MARK: - Correcting a past run
+
+    private func session(_ steps: [StepResult]) -> SessionResult {
+        let start = Date(timeIntervalSince1970: 1_758_000_000)
+        let active = steps.reduce(0) { $0 + $1.actualSeconds }
+        return SessionResult(
+            startedAt: start, endedAt: start.addingTimeInterval(TimeInterval(active + 30)),
+            plannedSeconds: steps.reduce(0) { $0 + $1.plannedSeconds },
+            activeSeconds: active, pausedSeconds: 30, completed: true, steps: steps
+        )
+    }
+
+    func testCorrectingAForgottenLastStepPullsTheEndBackIn() {
+        // Coffee left running for two hours after the routine was really over.
+        let run = session([step(300, 280), step(720, 7_200)])
+        let fixed = run.correcting(stepAt: 1, toSeconds: 660)
+
+        XCTAssertEqual(fixed.steps[1].actualSeconds, 660)
+        XCTAssertEqual(fixed.activeSeconds, 940)
+        XCTAssertEqual(fixed.endedAt, run.endedAt.addingTimeInterval(-6_540), "the end moves by exactly the correction")
+        XCTAssertEqual(fixed.startedAt, run.startedAt, "the start was recorded right and stays")
+        XCTAssertEqual(fixed.pausedSeconds, 30, "pauses are untouched")
+        XCTAssertEqual(fixed.steps[1].outcome, .under)
+        XCTAssertEqual(fixed.steps[0], run.steps[0], "other steps are untouched")
+    }
+
+    func testACorrectedAutoStepIsJudgedByItsNewTime() {
+        let run = session([step(60, 60, auto: true)])
+        let fixed = run.correcting(stepAt: 0, toSeconds: 90)
+
+        XCTAssertFalse(fixed.steps[0].autoAdvanced)
+        XCTAssertEqual(fixed.steps[0].outcome, .over)
+    }
+
+    func testCorrectingIsANoOpForTheSameTimeOrABadIndex() {
+        let run = session([step(60, 70)])
+        XCTAssertEqual(run.correcting(stepAt: 0, toSeconds: 70), run)
+        XCTAssertEqual(run.correcting(stepAt: 3, toSeconds: 10), run)
+        XCTAssertEqual(run.correcting(stepAt: 0, toSeconds: -5).steps[0].actualSeconds, 0, "clamped at zero")
+    }
 }
+

@@ -29,6 +29,17 @@ final class RoutineSession {
         stepRecords = result.steps
     }
 
+    /// Writes a corrected copy of this run back (see `SessionResult.correcting`).
+    /// The start time is the run's identity and never changes.
+    func apply(_ corrected: SessionResult) {
+        endedAt = corrected.endedAt
+        plannedSeconds = corrected.plannedSeconds
+        activeSeconds = corrected.activeSeconds
+        pausedSeconds = corrected.pausedSeconds
+        completed = corrected.completed
+        stepRecords = corrected.steps
+    }
+
     var result: SessionResult {
         SessionResult(
             startedAt: startedAt,
