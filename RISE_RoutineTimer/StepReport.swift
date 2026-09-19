@@ -77,9 +77,7 @@ nonisolated struct StepReport: Equatable {
     // MARK: - Timing
 
     /// Runs that were timed normally: over, under or on plan.
-    var timed: [Run] {
-        runs.filter { $0.outcome == .over || $0.outcome == .under || $0.outcome == .onPlan }
-    }
+    var timed: [Run] { runs.filter(\.outcome.isTimed) }
 
     private var timedSeconds: [Int] { timed.map(\.result.actualSeconds) }
 

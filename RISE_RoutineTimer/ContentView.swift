@@ -2,7 +2,8 @@
 //  ContentView.swift
 //  RISE_RoutineTimer
 //
-//  The root screen owns the saved routine query and shows the two main tabs.
+//  The root screen owns the saved routine query and shows the four tabs:
+//  Today, Run, History and Settings.
 //
 
 import SwiftData

@@ -216,4 +216,40 @@ final class MorningMetricsTests: XCTestCase {
     func testInsightsFallBackWithNoData() {
         XCTAssertEqual(metrics([]).insights(now: now()).count, 1)
     }
+
+    // MARK: - A routine start implies a wake time
+
+    func testStartingTheRoutineImpliesAWakeTimeWhenNoneIsLogged() {
+        let start = at(0, 6, 50)
+        XCTAssertEqual(settings.impliedWake(routineStart: start, existingWake: nil, calendar: calendar), start)
+
+        // Up before the target still counts: that is a negative snooze.
+        let early = at(0, 5, 40)
+        XCTAssertEqual(settings.impliedWake(routineStart: early, existingWake: nil, calendar: calendar), early)
+    }
+
+    func testALoggedWakeTimeIsNeverReplaced() {
+        XCTAssertNil(settings.impliedWake(routineStart: at(0, 6, 50), existingWake: at(0, 6, 35), calendar: calendar))
+    }
+
+    /// An evening run against a 6:30 target would otherwise put a twelve-hour
+    /// snooze into the week's budget.
+    func testARunOutsideTheMorningImpliesNothing() {
+        XCTAssertNil(settings.impliedWake(routineStart: at(0, 19, 0), existingWake: nil, calendar: calendar))
+        XCTAssertNil(settings.impliedWake(routineStart: at(0, 0, 20), existingWake: nil, calendar: calendar))
+        // The window's edges are inside it: 12:30am and 12:30pm for a 6:30 target.
+        XCTAssertNotNil(settings.impliedWake(routineStart: at(0, 12, 30), existingWake: nil, calendar: calendar))
+        XCTAssertNotNil(settings.impliedWake(routineStart: at(0, 0, 30), existingWake: nil, calendar: calendar))
+    }
+
+    /// The point of it: a morning started from the Run tab is a complete
+    /// record, so it reaches the baselines instead of being dropped.
+    func testAnImpliedWakeMakesTheMorningCount() {
+        let start = at(0, 6, 50)
+        let wake = settings.impliedWake(routineStart: start, existingWake: nil, calendar: calendar)
+        let morning = MorningRecord(day: day(0), wakeAt: wake, routineStartAt: start, routineEndAt: at(0, 7, 30), completedRoutine: true)
+        XCTAssertTrue(morning.isComplete)
+        XCTAssertEqual(morning.snoozeMinutes(settings: settings, calendar: calendar), 20)
+        XCTAssertEqual(morning.activationMinutes, 0)
+    }
 }

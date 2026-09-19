@@ -100,6 +100,30 @@ final class RoutineStatsTests: XCTestCase {
         XCTAssertTrue(twoOnly.isEmpty)
     }
 
+    /// A step checked off in a few seconds barely happened; it is not a fast
+    /// run. Counted as samples, three of these were enough to suggest cutting
+    /// a five-minute step to a couple of minutes.
+    func testCutShortRunsAreNotEvidence() {
+        let dua = RunStep(title: "Dua", durationSeconds: 300, autoNext: false)
+        func record(_ actual: Int) -> StepResult {
+            StepResult(stepID: dua.id, title: dua.title, plannedSeconds: 300, actualSeconds: actual, autoAdvanced: false)
+        }
+
+        let sessions = [305, 10, 295, 8, 300, 12].enumerated().map { offset, actual in
+            session(dayOffset: -offset, active: 1200, steps: [record(actual)])
+        }
+        let stats = RoutineStats(sessions: sessions, calendar: calendar)
+
+        XCTAssertEqual(stats.averageActual(forStepID: dua.id), StepAverage(averageSeconds: 300, sampleCount: 3))
+        XCTAssertTrue(stats.suggestions(for: [dua]).isEmpty, "the timed runs are on plan; the rushed ones say nothing")
+
+        // The step history page reads the same runs through StepReport, and
+        // has to land on the same number.
+        let report = StepReport(stepID: dua.id, plannedSeconds: 300, sessions: sessions)
+        XCTAssertEqual(report.timed.count, 3)
+        XCTAssertEqual(report.typicalSeconds, 300)
+    }
+
     func testRoundedDuration() {
         XCTAssertEqual(RoutineStats.roundedDuration(52), 45)
         XCTAssertEqual(RoutineStats.roundedDuration(170), 180)
@@ -114,19 +138,21 @@ final class RoutineStatsTests: XCTestCase {
         StepResult(stepID: id, title: "Dua", plannedSeconds: 300, actualSeconds: actual, autoAdvanced: auto, skipped: skipped)
     }
 
-    func testStepHistorySummarisesManualSamplesSkipsAndAutoAdvances() {
+    func testStepHistorySummarisesTimedSamplesSkipsAndAutoAdvances() {
         let id = UUID()
         let stats = RoutineStats(sessions: [
             session(dayOffset: 0, active: 1200, steps: [stepResult(id, actual: 240)]),
             session(dayOffset: -1, active: 1200, steps: [stepResult(id, actual: 360)]),
             session(dayOffset: -2, active: 1200, steps: [stepResult(id, actual: 300, auto: true)]),
             session(dayOffset: -3, active: 1200, steps: [stepResult(id, actual: 20, skipped: true)]),
-            session(dayOffset: -4, active: 100, completed: false, steps: [stepResult(id, actual: 1)]),
+            session(dayOffset: -4, active: 1200, steps: [stepResult(id, actual: 12)]),
+            session(dayOffset: -5, active: 100, completed: false, steps: [stepResult(id, actual: 1)]),
         ], calendar: calendar)
 
         let history = stats.history(forStepID: id)
-        XCTAssertEqual(history.appearances, 4, "abandoned sessions are not evidence")
-        XCTAssertEqual(history.manualSamples, [240, 360], "newest first, manual completions only")
+        XCTAssertEqual(history.appearances, 5, "abandoned sessions are not evidence")
+        XCTAssertEqual(history.timedSamples, [240, 360], "newest first, normally timed runs only")
+        XCTAssertEqual(history.cutShort, 1, "checked off at 12 s of 300 — counted, never timed")
         XCTAssertEqual(history.averageSeconds, 300)
         XCTAssertEqual(history.bestSeconds, 240)
         XCTAssertEqual(history.lastSeconds, 240)
@@ -135,7 +161,7 @@ final class RoutineStatsTests: XCTestCase {
         XCTAssertTrue(history.hasEvidence)
     }
 
-    func testStepHistoryNeedsTwoManualSamplesForAnAverage() {
+    func testStepHistoryNeedsTwoTimedSamplesForAnAverage() {
         let id = UUID()
         let stats = RoutineStats(sessions: [
             session(dayOffset: 0, active: 1200, steps: [stepResult(id, actual: 250)]),
@@ -149,6 +175,6 @@ final class RoutineStatsTests: XCTestCase {
 
         let unknown = stats.history(forStepID: UUID())
         XCTAssertFalse(unknown.hasEvidence)
-        XCTAssertEqual(unknown, StepHistory(appearances: 0, manualSamples: [], skipped: 0, autoAdvanced: 0))
+        XCTAssertEqual(unknown, StepHistory(appearances: 0, timedSamples: [], skipped: 0, cutShort: 0, autoAdvanced: 0))
     }
 }

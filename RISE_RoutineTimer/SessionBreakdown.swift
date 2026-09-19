@@ -52,10 +52,20 @@ nonisolated enum StepOutcome: Equatable {
 
     /// Cut short and skipped steps say nothing about pace.
     var barelyHappened: Bool { self == .cutShort || self == .skipped }
+
+    /// Timed normally: over, under or on plan. These are the only runs that
+    /// say how long a step takes — an auto step always takes its plan, and a
+    /// cut-short or skipped one barely happened. `StepReport` and
+    /// `RoutineStats` both count by this, so the step history page, the stats
+    /// sheet and the suggestions cannot disagree about the same step.
+    var isTimed: Bool { self == .over || self == .under || self == .onPlan }
 }
 
 extension StepResult {
     nonisolated var outcome: StepOutcome { StepOutcome(self) }
+
+    /// See `StepOutcome.isTimed`.
+    nonisolated var isTimed: Bool { outcome.isTimed }
 
     /// Time over or under as a share of the step's own plan: +0.2 is 20% over.
     nonisolated var shareOfPlan: Double {

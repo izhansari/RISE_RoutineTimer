@@ -17,9 +17,17 @@ final class RoutineAlertCoordinator {
     private let alerts = RoutineAlerts()
     private let liveActivity = RoutineLiveActivityController()
     private let recordSession: (SessionResult) -> Void
+    /// Called with the run's start time, from whichever door it was started:
+    /// the Today tab, the Run tab or the Start intent.
+    private let runStarted: (Date) -> Void
 
-    init(engine: RoutineEngine, recordSession: @escaping (SessionResult) -> Void) {
+    init(
+        engine: RoutineEngine,
+        runStarted: @escaping (Date) -> Void = { _ in },
+        recordSession: @escaping (SessionResult) -> Void
+    ) {
         self.engine = engine
+        self.runStarted = runStarted
         self.recordSession = recordSession
         engine.onEvent = { [weak self] event in
             self?.handle(event)
@@ -51,7 +59,7 @@ final class RoutineAlertCoordinator {
 
         switch event {
         case .started:
-            break
+            runStarted(engine.routineStartDate ?? Date())
         case .resumed:
             syncNotifications()
         case .paused, .reset:
@@ -62,7 +70,6 @@ final class RoutineAlertCoordinator {
                 let isLast = index == engine.steps.count - 1
                 alerts.stepStarted(engine.steps[index], isLast: isLast, sounds: soundsEnabled, voice: voiceEnabled)
             }
-            syncNotifications()
             syncNotifications()
         case .overtimeStarted(let index):
             if engine.steps.indices.contains(index) {

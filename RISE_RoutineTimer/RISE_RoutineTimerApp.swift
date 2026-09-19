@@ -36,7 +36,14 @@ struct RISE_RoutineTimerApp: App {
         let engine = RoutineEngine()
         let recorder = SessionRecorder(context: sharedModelContainer.mainContext)
         _engine = State(initialValue: engine)
-        alertCoordinator = RoutineAlertCoordinator(engine: engine) { recorder.record($0) }
+        let morningLog = MorningLogStore(context: sharedModelContainer.mainContext)
+        alertCoordinator = RoutineAlertCoordinator(
+            engine: engine,
+            // Starting the routine means you are up, whether or not "I'm
+            // awake" was tapped first.
+            runStarted: { morningLog.recordWakeImplied(byRoutineStartingAt: $0, settings: .stored()) },
+            recordSession: { recorder.record($0) }
+        )
 
         // App Intents are built by the system, outside the view tree; this
         // is how they reach the same engine and store the views use.

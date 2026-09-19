@@ -402,7 +402,7 @@ toggles, and End Routine. The routine-end toggle from Run 14 went away — the e
 - **History sessions open the same sheet**; the rows show the start–end range and a chevron.
 - The step stats sheet is presented through `StepStatsRequest` — a clean device build rejected `.sheet(item:)` on
   the model itself.
-- Not done yet: keeping cut-short samples out of `RoutineStats` averages and suggestions.
+- ~~Not done yet: keeping cut-short samples out of `RoutineStats` averages and suggestions.~~ Done in Run 23.
 
 ### Run 22 — Step history, glyphs, header (2026-09-13)
 
@@ -412,6 +412,28 @@ toggles, and End Routine. The routine-end toggle from Run 14 went away — the e
 - **Session summary:** the time-over/under swap rolls in and reverts after five seconds; tapping a step's name
   pushes **`StepHistoryView`** — typical vs plan with a verdict and trend, every run as bars against the plan and
   usual band, a 3×2 facts grid, the suggestion, recent runs. **`StepReport`** is the maths, with seven tests (107).
+
+### Run 23 — Clean-up pass (2026-09-19)
+
+A read-through of the whole codebase before the next round of tweaks; these are what it turned up.
+
+- **Notifications deleted themselves inside an auto chain.** `schedule()` cleared the old alerts with an asynchronous
+  fetch-then-remove, then added the new ones straight away; the removal landed *after* the adds, and an auto chain's
+  next plan reuses the previous plan's identifiers. A hosted test against the real notification centre showed 0 of 3
+  alerts surviving a reschedule. Fixed with one serial queue for every change plus per-pass identifiers; the duplicate
+  `syncNotifications()` call on `stepStarted` went too. `RoutineNotificationTests` pins both.
+- **A routine start implies a wake time.** Started from the Run tab or the Start intent with no "I'm awake", a morning
+  had no wake time and was left out of every baseline, and Today showed `I'M AWAKE` throughout the run. The start is
+  now logged as the wake time when none exists and the run is within 6 h of the wake goal
+  (`MorningSettings.impliedWake`, `MorningLogStore.recordWakeImplied`); Today's stage checks for a live run first.
+- **One definition of a timed run.** `StepOutcome.isTimed` (over / under / on plan) is now what `RoutineStats` counts
+  for averages, the stats sheet and suggestions, as `StepReport` already did — cut-short runs were samples in one and
+  not the other. `StepHistory.manualSamples` → `timedSamples`, plus a `cutShort` count the stats sheet shows.
+- The deprecated `requestConfirmation(result:confirmationActionName:)` replaced (iOS 18 form, with the plain
+  `requestConfirmation()` as the iOS 17 fallback); the build is warning-free again.
+- Stale comments corrected: `ActiveRoutineView`'s header (bar order, the chips, the checkmark border),
+  `RoutineIntents` (three intents), `ContentView` (four tabs), `RoutinePace` (status pill, PACE micro-stat).
+- 110 → 121 tests.
 
 ### Later (next)
 17. iCloud sync via SwiftData + CloudKit (decide **before** run 2: CloudKit requires all properties to have defaults and all relationships optional, which constrains the `RoutineSession` design).

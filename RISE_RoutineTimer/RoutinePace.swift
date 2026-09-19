@@ -19,9 +19,9 @@
 //  `RoutineEngine.tick()` advances an auto-next step the moment its time is
 //  up. That is the point: overtime *means* "this step is waiting on you".
 //
-//  The cumulative ahead/behind figure is still shown, as text, in the PACE
-//  micro-stat — a number that can be read when wanted rather than a wash that
-//  cannot be escaped.
+//  The cumulative ahead/behind figure is still shown, as text, in the run
+//  sheet's Pace row — a number that can be read when wanted rather than a wash
+//  that cannot be escaped.
 //
 
 import SwiftUI
@@ -90,9 +90,9 @@ nonisolated enum StepPace: String, CaseIterable, Equatable {
         }
     }
 
-    /// Colour is never the only cue — the countdown flips to "+M:SS" and the
-    /// status pill changes wording too, so the state survives being colour-blind
-    /// or glancing at the screen from across the room.
+    /// Colour is never the only cue — the countdown flips to "+M:SS" as well,
+    /// so the state survives being colour-blind or glancing at the screen from
+    /// across the room.
     func fillColor(theme: FillTheme) -> Color {
         switch self {
         case .onTime:  return theme.color
@@ -115,7 +115,8 @@ nonisolated enum RoutinePace {
     /// and the "+" countdown, so this is only about the run as a whole.
     static let behindAlertSeconds = 120
 
-    /// "ON PLAN", "1:30 AHEAD" or "2:05 BEHIND" for the PACE micro-stat.
+    /// "ON PLAN", "1:30 AHEAD" or "2:05 BEHIND", for the run sheet's Pace row
+    /// and the active screen's behind-plan line.
     /// `deltaSeconds` is `RoutineEngine.scheduleDeltaSeconds`: positive is behind.
     static func label(deltaSeconds: Int) -> String {
         if abs(deltaSeconds) <= onTrackSlackSeconds { return "ON PLAN" }

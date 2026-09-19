@@ -88,32 +88,35 @@ nonisolated struct RoutineStats {
     // MARK: - Per-step averages
 
     /// Typical actual time for one step over recent sessions, on the same
-    /// evidence rules as `suggestions`: only manual completions count, since
-    /// an auto-advanced step always "takes" exactly its planned time.
+    /// evidence rules as `suggestions`: only runs that were timed normally
+    /// count (`StepOutcome.isTimed`). An auto-advanced step always "takes"
+    /// exactly its planned time, and one checked off in a few seconds says
+    /// nothing about how long the step takes — three of those used to be
+    /// enough to suggest shortening a five-minute step to fifteen seconds.
     func averageActual(forStepID id: UUID) -> StepAverage? {
         let recent = completed.prefix(Self.suggestionSessionWindow)
         let samples = recent.flatMap { session in
-            session.steps.filter { $0.stepID == id && !$0.autoAdvanced && !$0.wasSkipped }.map(\.actualSeconds)
+            session.steps.filter { $0.stepID == id && $0.isTimed }.map(\.actualSeconds)
         }
         guard samples.count >= 2 else { return nil }
         return StepAverage(averageSeconds: samples.reduce(0, +) / samples.count, sampleCount: samples.count)
     }
 
     /// Everything the step-stats sheet shows for one step, over the same
-    /// recent window as `suggestions`. Averages use manual completions only
-    /// (an auto-advanced step always "takes" its planned time); the skip and
-    /// auto-advance counts cover every appearance.
+    /// recent window as `suggestions`. Averages use normally timed runs only
+    /// (`StepOutcome.isTimed`); the skip, cut-short and auto counts cover
+    /// every appearance.
     func history(forStepID id: UUID) -> StepHistory {
         let recent = completed.prefix(Self.suggestionSessionWindow)
         let appearances = recent.flatMap { session in
             session.steps.filter { $0.stepID == id }
         }
-        let manual = appearances.filter { !$0.autoAdvanced && !$0.wasSkipped }.map(\.actualSeconds)
         return StepHistory(
             appearances: appearances.count,
-            manualSamples: manual,
-            skipped: appearances.filter(\.wasSkipped).count,
-            autoAdvanced: appearances.filter { $0.autoAdvanced && !$0.wasSkipped }.count
+            timedSamples: appearances.filter(\.isTimed).map(\.actualSeconds),
+            skipped: appearances.filter { $0.outcome == .skipped }.count,
+            cutShort: appearances.filter { $0.outcome == .cutShort }.count,
+            autoAdvanced: appearances.filter { $0.outcome == .auto }.count
         )
     }
 
@@ -123,14 +126,14 @@ nonisolated struct RoutineStats {
     static let suggestionSessionWindow = 10
 
     /// Steps whose typical actual time differs enough from the plan to be
-    /// worth adjusting. Only manually completed steps count as evidence,
-    /// since an auto-advanced step always "takes" exactly its planned time.
+    /// worth adjusting. Only normally timed runs count as evidence — see
+    /// `averageActual(forStepID:)`.
     func suggestions(for steps: [RunStep]) -> [StepSuggestion] {
         let recent = completed.prefix(Self.suggestionSessionWindow)
 
         return steps.compactMap { step in
             let samples = recent.flatMap { session in
-                session.steps.filter { $0.stepID == step.id && !$0.autoAdvanced && !$0.wasSkipped }.map(\.actualSeconds)
+                session.steps.filter { $0.stepID == step.id && $0.isTimed }.map(\.actualSeconds)
             }
             guard samples.count >= Self.suggestionMinimumSamples else { return nil }
 
@@ -167,18 +170,19 @@ nonisolated struct StepAverage: Equatable {
     var sampleCount: Int
 }
 
-/// One step's recent record. `manualSamples` are newest first.
+/// One step's recent record. `timedSamples` are newest first.
 nonisolated struct StepHistory: Equatable {
     var appearances: Int
-    var manualSamples: [Int]
+    var timedSamples: [Int]
     var skipped: Int
+    var cutShort: Int
     var autoAdvanced: Int
 
     var averageSeconds: Int? {
-        guard manualSamples.count >= 2 else { return nil }
-        return manualSamples.reduce(0, +) / manualSamples.count
+        guard timedSamples.count >= 2 else { return nil }
+        return timedSamples.reduce(0, +) / timedSamples.count
     }
-    var bestSeconds: Int? { manualSamples.min() }
-    var lastSeconds: Int? { manualSamples.first }
+    var bestSeconds: Int? { timedSamples.min() }
+    var lastSeconds: Int? { timedSamples.first }
     var hasEvidence: Bool { appearances > 0 }
 }

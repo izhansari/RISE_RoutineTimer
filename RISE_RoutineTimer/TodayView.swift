@@ -97,13 +97,15 @@ struct TodayView: View {
 
     private enum Stage { case awake, start, running, complete }
 
-    /// How long after the target wake time the live snooze counter keeps
-    /// running before it gives up and shows nothing.
-    private static let liveSnoozeWindow: TimeInterval = 6 * 60 * 60
-
+    /// A live run wins over everything: with the timer going, the only useful
+    /// button is the way back to it. It used to come second, so a routine
+    /// started from the Run tab without a wake time left "I'm awake" up for
+    /// the whole run. (A morning run logs its own wake time now — see
+    /// `MorningSettings.impliedWake` — so this is for runs outside the
+    /// morning, which don't.)
     private var stage: Stage {
-        if today.wakeAt == nil { return .awake }
         if engine.hasActiveRun { return .running }
+        if today.wakeAt == nil { return .awake }
         if today.routineEndAt == nil { return .start }
         return .complete
     }
@@ -250,7 +252,7 @@ struct TodayView: View {
                 // 9pm is not a fourteen-hour snooze — it is just unlogged.
                 let target = settings.targetWake(on: now)
                 let since = now.timeIntervalSince(target)
-                guard since >= 0, since <= Self.liveSnoozeWindow else { return nil }
+                guard since >= 0, since <= MorningSettings.morningWindow else { return nil }
                 return elapsed(since, signed: true)
             }
             return elapsed(wake.timeIntervalSince(settings.targetWake(on: wake)), signed: true)

@@ -43,6 +43,42 @@ nonisolated struct MorningSettings: Equatable {
     func targetWake(on date: Date, calendar: Calendar = .current) -> Date {
         calendar.startOfDay(for: date).addingTimeInterval(TimeInterval(targetWakeMinutes * 60))
     }
+
+    /// How far from the target wake time a moment can be and still belong to
+    /// the morning. An unlogged morning at 9pm is not a fourteen-hour snooze —
+    /// it is just unlogged — so the Today tab's live snooze counter gives up
+    /// past this, and a routine run outside it says nothing about waking.
+    static let morningWindow: TimeInterval = 6 * 60 * 60
+
+    /// The wake time a routine start implies, when none has been logged.
+    ///
+    /// You cannot run the routine asleep. The web app never needed this — its
+    /// one button walks awake → start → end in order — but here the Run tab
+    /// and the Start intent are side doors past "I'm awake", and a morning
+    /// started through them had no wake time: no snooze, no activation, left
+    /// out of every baseline, and Today still offering "I'm awake" with the
+    /// timer running. The start is the latest you can have woken, so it is
+    /// the honest stand-in, and the Today tab's EDIT corrects it.
+    ///
+    /// Nil when a wake time already exists, or when the run is too far from
+    /// the target to be the morning one (an evening run must not log a
+    /// twelve-hour snooze against the week's budget).
+    func impliedWake(routineStart: Date, existingWake: Date?, calendar: Calendar = .current) -> Date? {
+        guard existingWake == nil else { return nil }
+        let target = targetWake(on: routineStart, calendar: calendar)
+        guard abs(routineStart.timeIntervalSince(target)) <= Self.morningWindow else { return nil }
+        return routineStart
+    }
+
+    /// The settings as saved by the Settings tab, for code outside the view
+    /// tree that cannot use `@AppStorage`.
+    static func stored(in defaults: UserDefaults = .standard) -> MorningSettings {
+        MorningSettings(
+            targetWakeMinutes: defaults.object(forKey: targetWakeKey) as? Int ?? defaultTargetWakeMinutes,
+            snoozeBudgetMinutes: defaults.object(forKey: snoozeBudgetKey) as? Int ?? defaultSnoozeBudget,
+            activationBudgetMinutes: defaults.object(forKey: activationBudgetKey) as? Int ?? defaultActivationBudget
+        )
+    }
 }
 
 // MARK: - One morning

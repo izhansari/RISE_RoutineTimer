@@ -71,17 +71,17 @@ struct StepStatsSheet: View {
 
     @ViewBuilder
     private func recentRows(_ history: StepHistory) -> some View {
-        let manualCount = history.manualSamples.count
+        let timedCount = history.timedSamples.count
         if let average = history.averageSeconds {
             ReceiptStatRow("Average", TimeFormatting.clockTime(from: average),
-                           detail: "\(manualCount) manual")
+                           detail: "\(timedCount) timed")
             ReceiptRule()
             let delta = average - step.durationSeconds
             ReceiptStatRow("Vs plan", delta == 0 ? "ON PLAN"
                            : "\(delta < 0 ? "−" : "+")\(TimeFormatting.clockTime(from: abs(delta)))")
         } else {
             ReceiptStatRow("Average", "—",
-                           detail: step.autoNext ? "auto runs to plan" : "after 2 manual runs")
+                           detail: step.autoNext ? "auto runs to plan" : "after 2 timed runs")
         }
         if let best = history.bestSeconds {
             ReceiptRule()
@@ -93,5 +93,9 @@ struct StepStatsSheet: View {
         }
         ReceiptRule()
         ReceiptStatRow("Skipped", "\(history.skipped)", detail: "of \(history.appearances) runs")
+        if history.cutShort > 0 {
+            ReceiptRule()
+            ReceiptStatRow("Cut short", "\(history.cutShort)", detail: "not timed")
+        }
     }
 }

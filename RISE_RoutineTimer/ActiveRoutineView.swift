@@ -10,8 +10,9 @@
 //  the colour of the fill rather than by a label.
 //
 //  Chrome lives in one place: a floating bar at the bottom, in the shape of
-//  Arc's URL bar. Pause on the left, the projected finish in the middle, a
-//  chevron on the right that raises the run sheet. The bar's top edge fills
+//  Arc's URL bar. A chevron on the left that raises the run sheet, the
+//  projected finish in the middle, then notes (when the step has one) and
+//  pause at the right edge, under the thumb. The bar's top edge fills
 //  in proportion to the whole routine. That replaced a row of four chips and
 //  a strip of step dots across the top, which with sixteen steps ran edge to
 //  edge and left nothing for the eye to rest on.
@@ -22,15 +23,19 @@
 //    fill line. Every *control* lives in the sibling overlay instead, because
 //    the fill builds its content twice and would otherwise give us two of
 //    each button stacked on top of each other.
-//  * The bar and the chips are opaque white and float above the fill. The
-//    bar has to be: it sits at the bottom, which is inside the coloured
-//    region for most of a step, and a grey-on-black progress edge would be
-//    fighting the indigo behind it otherwise.
+//  * The check and skip chips are the one exception, and only by half: their
+//    *visuals* are drawn inside the fill, so the fill line crosses them the
+//    way it crosses the type, while the overlay holds invisible hit targets
+//    of the same size in the same slot.
+//  * The bar is opaque white and floats above the fill. It has to be: it
+//    sits at the bottom, which is inside the coloured region for most of a
+//    step, and a grey-on-black progress edge would be fighting the indigo
+//    behind it otherwise.
 //  * The step name opens the notes sheet. It is drawn as plain text inside
 //    the fill (so it still inverts) and the tap target is placed over it in
 //    the overlay, using an anchor the content publishes.
-//  * The checkmark's border is the auto-next indicator, alongside the
-//    AUTO / MANUAL badge under the step name.
+//  * Auto-next is said once: the AUTO / MANUAL badge under the step name.
+//    Both chips carry the same dashed border whatever the step.
 //
 //  Two progress indicators, on purpose: the rising fill is *this step*; the
 //  bar's edge is *the whole routine*. They measure different things.
@@ -386,10 +391,10 @@ struct ActiveRoutineView: View {
 
     // MARK: - Bottom bar
 
-    /// Arc's URL bar, repurposed: the one control that needs to be a single
-    /// tap (pause), the one number worth keeping in view (when you'll be
-    /// done), and a chevron for everything else. The top edge is the whole
-    /// routine's progress.
+    /// Arc's URL bar, repurposed: a chevron for everything else, the one
+    /// number worth keeping in view (when you'll be done), and the one
+    /// control that needs to be a single tap (pause). The top edge is the
+    /// whole routine's progress.
     private var bottomBar: some View {
         VStack(spacing: 0) {
             GeometryReader { geo in

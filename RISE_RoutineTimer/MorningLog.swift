@@ -97,6 +97,20 @@ final class MorningLogStore {
         save()
     }
 
+    /// Called as a routine starts. Logs the start as the wake time when the
+    /// morning has none — see `MorningSettings.impliedWake`. Returns whether
+    /// it wrote anything.
+    @discardableResult
+    func recordWakeImplied(byRoutineStartingAt start: Date, settings: MorningSettings) -> Bool {
+        let logs = (try? context.fetch(FetchDescriptor<MorningLog>())) ?? []
+        let existing = log(logs, dayOf: start)?.wakeAt
+        guard let wake = settings.impliedWake(routineStart: start, existingWake: existing, calendar: calendar) else {
+            return false
+        }
+        recordWake(at: wake, existing: logs)
+        return true
+    }
+
     func setWake(_ wakeAt: Date?, on date: Date, existing logs: [MorningLog]) {
         let day = calendar.startOfDay(for: date)
         if let today = log(logs, dayOf: date) {

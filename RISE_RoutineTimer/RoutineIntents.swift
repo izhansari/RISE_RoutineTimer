@@ -2,14 +2,16 @@
 //  RoutineIntents.swift
 //  RISE_RoutineTimer
 //
-//  The two things Shortcuts can ask the app to do. Both run in the app's
-//  own process against the same engine and store the views use, so there is
-//  no second code path to keep honest.
+//  The three things Shortcuts can ask the app to do: start the routine, log
+//  the wake time, and open the Today tab. All run in the app's own process
+//  against the same engine and store the views use, so there is no second
+//  code path to keep honest.
 //
 //  The intended automation: when the phone comes off the charger in the
 //  morning, run "I'm Awake" (which confirms first, so a false alarm can be
-//  waved off), then "Open RISE" — or "Start Morning Routine", which opens
-//  the app itself.
+//  waved off), then "Open Today" — or "Start Morning Routine", which opens
+//  the app itself and, if "I'm Awake" was waved off, logs the start as the
+//  wake time (see `MorningSettings.impliedWake`).
 //
 
 import AppIntents
@@ -85,10 +87,14 @@ struct MarkAwakeIntent: AppIntent {
         }
 
         if askFirst {
-            try await requestConfirmation(
-                result: .result(dialog: "Mark you as awake now?"),
-                confirmationActionName: .go
-            )
+            // The form that carries its own wording is iOS 18; the one it
+            // replaced is deprecated outright. On 17 the system's plain
+            // confirmation of "I'm Awake" says the same thing in fewer words.
+            if #available(iOS 18.0, *) {
+                try await requestConfirmation(actionName: .go, dialog: "Mark you as awake now?")
+            } else {
+                try await requestConfirmation()
+            }
         }
 
         store.recordWake(at: now, existing: logs)
@@ -131,8 +137,8 @@ enum RoutineIntentError: Error, CustomLocalizedStringResourceConvertible {
 
 // MARK: - App Shortcuts
 
-/// Surfaces both intents in the Shortcuts app and to Siri without the user
-/// building anything first.
+/// Surfaces all three intents in the Shortcuts app and to Siri without the
+/// user building anything first.
 struct RISEShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(
