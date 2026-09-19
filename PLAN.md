@@ -435,6 +435,20 @@ A read-through of the whole codebase before the next round of tweaks; these are 
   `RoutineIntents` (three intents), `ContentView` (four tabs), `RoutinePace` (status pill, PACE micro-stat).
 - 110 → 121 tests.
 
+### Run 24 — A ring in the summary, inline corrections, scrubbable charts (2026-09-19)
+
+- **`RunRingView`:** the session summary opens with the run as a ring — one slice per step, sized by time taken,
+  clockwise from twelve in run order, each a pale tint of how the step went. Tap a slice (or press and drag round the
+  ring) and it goes solid and grows; the hole shows its time and share of the run, with the name and % over / under
+  beneath. Opens on the biggest slice. **`RunComposition`** is the maths, including hand-rolled tap hit-testing:
+  Swift Charts' own angle selection ignores a plain tap inside a scroll view.
+- **Corrections happen in the list.** `SessionEditView` opens the wheel under the tapped row and raises a pinned bar
+  with the step's stats, the corrected run, and Cancel / Save; the screen locks once the wheel has moved. The
+  sheet → page → sheet nesting is gone, and `StepTimeEditor` with it.
+- **History's snooze / activation / routine-length charts scrub** (`MetricChart`): a fixed readout above the plot, a
+  rule on the selected morning, a tick on each new day.
+- 121 → 127 tests.
+
 ### Later (next)
 17. iCloud sync via SwiftData + CloudKit (decide **before** run 2: CloudKit requires all properties to have defaults and all relationships optional, which constrains the `RoutineSession` design).
 18. Multiple routines / profiles if "our routine" means more than one person.

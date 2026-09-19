@@ -14,6 +14,9 @@
 //  Steps that barely happened (see `SessionBreakdown`) are drawn as a grey
 //  hatch and left out of the pace number in the header.
 //
+//  Above the rows sits `RunRingView`, which asks the other question: not how
+//  each step did against its plan, but which steps the run was made of.
+//
 
 import SwiftData
 import SwiftUI
@@ -88,6 +91,20 @@ struct SessionSummaryView: View {
                         .padding(.bottom, 14)
 
                     ReceiptRule()
+
+                    // Which steps the run was made of, before how each one
+                    // did against its plan. A run where nothing took any
+                    // time has no ring to draw.
+                    let composition = RunComposition(steps: result.steps)
+                    if composition.totalSeconds > 0 {
+                        microLabel("Where the time went")
+                            .padding(.top, 14)
+                        RunRingView(composition: composition, icons: icons, tint: tint, over: Self.overColor)
+                            .padding(.top, 12)
+                            .padding(.bottom, 18)
+
+                        ReceiptRule()
+                    }
 
                     axisHeader
                         .padding(.top, 12)

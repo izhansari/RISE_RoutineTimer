@@ -131,6 +131,97 @@ nonisolated struct SessionBreakdown: Equatable {
     }
 }
 
+// MARK: - Where the time went
+
+/// A finished run as shares of the time it took: what the summary's ring is
+/// drawn from, and how a touch on the ring finds its step.
+///
+/// Shares are of the *steps'* time, not the session's active time. The two are
+/// equal for a finished run, but a run ended early also counts the part of
+/// the step it was abandoned on, which has no result and so no slice — and a
+/// ring whose slices stop at 93% reads as a drawing bug.
+nonisolated struct RunComposition: Equatable {
+    nonisolated struct Slice: Equatable, Identifiable {
+        /// Position in the run.
+        let index: Int
+        let result: StepResult
+        let outcome: StepOutcome
+        /// How far into the run this step began, by step time (pauses excluded).
+        let startSeconds: Int
+        /// This step's share of the run's step time, 0…1.
+        let share: Double
+
+        var id: Int { index }
+        var endSeconds: Int { startSeconds + max(0, result.actualSeconds) }
+    }
+
+    let slices: [Slice]
+    let totalSeconds: Int
+
+    init(steps: [StepResult]) {
+        let total = steps.reduce(0) { $0 + max(0, $1.actualSeconds) }
+        var offset = 0
+        var slices: [Slice] = []
+        for (index, step) in steps.enumerated() {
+            let seconds = max(0, step.actualSeconds)
+            slices.append(Slice(
+                index: index,
+                result: step,
+                outcome: step.outcome,
+                startSeconds: offset,
+                share: total > 0 ? Double(seconds) / Double(total) : 0
+            ))
+            offset += seconds
+        }
+        self.slices = slices
+        totalSeconds = total
+    }
+
+    /// The step under a point `seconds` into the run. A boundary belongs to
+    /// the step that starts there, a step that took no time can never be
+    /// under a finger, and a point off either end clamps to the nearest step
+    /// that has any width.
+    func index(atSeconds seconds: Double) -> Int? {
+        let drawn = slices.filter { $0.result.actualSeconds > 0 }
+        guard let first = drawn.first, let last = drawn.last else { return nil }
+        if seconds < Double(first.startSeconds) { return first.index }
+        return drawn.first { seconds < Double($0.endSeconds) }?.index ?? last.index
+    }
+
+    /// The step under a tap on the ring, which is drawn centred in `size`,
+    /// clockwise from twelve, with a hole `innerRatio` of its radius wide.
+    /// Nil in the hole and outside the ring: the hole holds the readout, and
+    /// a tap there is not a tap on a step.
+    ///
+    /// Done by hand because Swift Charts' own selection waits for a short
+    /// press when the chart is inside a scroll view — that is how it tells a
+    /// touch from a scroll — so a plain tap, the obvious thing to do to a
+    /// slice, did nothing at all.
+    func index(at point: CGPoint, inRingOf size: CGSize, innerRatio: Double) -> Int? {
+        let radius = Double(min(size.width, size.height)) / 2
+        guard radius > 0, totalSeconds > 0 else { return nil }
+        let dx = Double(point.x - size.width / 2)
+        let dy = Double(point.y - size.height / 2)
+        let distance = (dx * dx + dy * dy).squareRoot()
+        guard distance >= radius * innerRatio, distance <= radius else { return nil }
+
+        // Clockwise from twelve: straight up is 0, three o'clock a quarter.
+        var turn = atan2(dx, -dy) / (2 * Double.pi)
+        if turn < 0 { turn += 1 }
+        return index(atSeconds: turn * Double(totalSeconds))
+    }
+
+    /// The step that took the most time — where the ring opens. The earlier
+    /// one on a tie.
+    var largestIndex: Int? {
+        var best: Slice?
+        for slice in slices where slice.result.actualSeconds > (best?.result.actualSeconds ?? 0) {
+            best = slice
+        }
+        return best?.index
+    }
+}
+
 // MARK: - Correcting a past run
 
 extension SessionResult {

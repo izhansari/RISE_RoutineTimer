@@ -116,5 +116,72 @@ final class SessionBreakdownTests: XCTestCase {
         XCTAssertEqual(run.correcting(stepAt: 3, toSeconds: 10), run)
         XCTAssertEqual(run.correcting(stepAt: 0, toSeconds: -5).steps[0].actualSeconds, 0, "clamped at zero")
     }
-}
 
+    // MARK: - Where the time went
+
+    func testCompositionSharesAddUpAndStackInRunOrder() {
+        let ring = RunComposition(steps: [step(300, 300), step(60, 100), step(600, 600)])
+
+        XCTAssertEqual(ring.totalSeconds, 1000)
+        XCTAssertEqual(ring.slices.map(\.startSeconds), [0, 300, 400])
+        XCTAssertEqual(ring.slices.map(\.share), [0.3, 0.1, 0.6])
+        XCTAssertEqual(ring.slices.reduce(0) { $0 + $1.share }, 1, accuracy: 0.0001)
+        XCTAssertEqual(ring.slices[1].outcome, .over, "each slice carries how its step went")
+        XCTAssertEqual(ring.largestIndex, 2)
+    }
+
+    func testATouchOnTheRingFindsItsStep() {
+        let ring = RunComposition(steps: [step(300, 300), step(60, 100), step(600, 600)])
+
+        XCTAssertEqual(ring.index(atSeconds: 0), 0)
+        XCTAssertEqual(ring.index(atSeconds: 299.9), 0)
+        XCTAssertEqual(ring.index(atSeconds: 300), 1, "a boundary belongs to the step that starts there")
+        XCTAssertEqual(ring.index(atSeconds: 399.9), 1)
+        XCTAssertEqual(ring.index(atSeconds: 400), 2)
+        XCTAssertEqual(ring.index(atSeconds: 1000), 2, "the far end clamps to the last step")
+        XCTAssertEqual(ring.index(atSeconds: -4), 0)
+    }
+
+    /// A step skipped the instant it appeared has no width, so it can be
+    /// neither under a finger nor where the ring opens.
+    func testStepsThatTookNoTimeAreNeverSelected() {
+        let ring = RunComposition(steps: [step(60, 0, skipped: true), step(60, 50), step(60, 0, skipped: true), step(60, 50)])
+
+        XCTAssertEqual(ring.index(atSeconds: 0), 1)
+        XCTAssertEqual(ring.index(atSeconds: 50), 3, "the empty step at the boundary is passed over")
+        XCTAssertEqual(ring.index(atSeconds: 500), 3)
+        XCTAssertEqual(ring.largestIndex, 1, "the earlier step on a tie")
+        XCTAssertEqual(ring.slices[0].share, 0)
+    }
+
+    /// Four equal steps: one per quadrant, clockwise from twelve.
+    func testATapOnTheRingIsReadClockwiseFromTwelve() {
+        let ring = RunComposition(steps: [step(60, 60), step(60, 60), step(60, 60), step(60, 60)])
+        let size = CGSize(width: 200, height: 200)
+        func tap(_ x: Double, _ y: Double) -> Int? {
+            ring.index(at: CGPoint(x: x, y: y), inRingOf: size, innerRatio: 0.6)
+        }
+
+        XCTAssertEqual(tap(160, 40), 0, "upper right")
+        XCTAssertEqual(tap(160, 160), 1, "lower right")
+        XCTAssertEqual(tap(40, 160), 2, "lower left")
+        XCTAssertEqual(tap(40, 40), 3, "upper left")
+        XCTAssertEqual(tap(101, 10), 0, "just past twelve")
+        XCTAssertEqual(tap(99, 10), 3, "just before it")
+
+        XCTAssertNil(tap(100, 100), "the hole holds the readout")
+        XCTAssertNil(tap(130, 100), "still inside the hole")
+        XCTAssertNil(tap(2, 2), "the corner of the square is outside the ring")
+    }
+
+    func testAnEmptyRunHasNoRing() {
+        XCTAssertNil(RunComposition(steps: []).largestIndex)
+        XCTAssertNil(RunComposition(steps: []).index(atSeconds: 10))
+
+        let nothingHappened = RunComposition(steps: [step(60, 0, skipped: true)])
+        XCTAssertEqual(nothingHappened.totalSeconds, 0)
+        XCTAssertNil(nothingHappened.largestIndex)
+        XCTAssertNil(nothingHappened.index(atSeconds: 0))
+        XCTAssertEqual(nothingHappened.slices[0].share, 0, "no division by zero")
+    }
+}

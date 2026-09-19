@@ -252,4 +252,21 @@ final class MorningMetricsTests: XCTestCase {
         XCTAssertEqual(morning.snoozeMinutes(settings: settings, calendar: calendar), 20)
         XCTAssertEqual(morning.activationMinutes, 0)
     }
+
+    // MARK: - Scrubbing the History charts
+
+    /// A bar spans its whole day, so a finger anywhere over it — left edge or
+    /// right — belongs to that morning, and a missed day's gap goes to
+    /// whichever neighbour is nearer.
+    func testAFingerOnAChartFindsTheMorningUnderIt() {
+        let points = [day(-5), day(-4), day(-1)].enumerated().map { MetricChart.Point(day: $1, value: $0) }
+
+        XCTAssertEqual(MetricChart.nearest(to: at(-4, 0, 5), in: points)?.value, 1, "the left edge of a bar")
+        XCTAssertEqual(MetricChart.nearest(to: at(-4, 23, 50), in: points)?.value, 1, "and its right edge")
+        XCTAssertEqual(MetricChart.nearest(to: at(-3, 9, 0), in: points)?.value, 1, "early in the gap")
+        XCTAssertEqual(MetricChart.nearest(to: at(-2, 15, 0), in: points)?.value, 2, "late in it")
+        XCTAssertEqual(MetricChart.nearest(to: at(-9, 0, 0), in: points)?.value, 0, "off the left end")
+        XCTAssertEqual(MetricChart.nearest(to: at(3, 0, 0), in: points)?.value, 2, "off the right end")
+        XCTAssertNil(MetricChart.nearest(to: now(), in: []))
+    }
 }
