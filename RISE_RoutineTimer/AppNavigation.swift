@@ -12,9 +12,24 @@ import SwiftData
 
 @Observable
 final class AppNavigation {
-    enum Tab: Hashable { case today, run, history, settings }
+    enum Tab: Hashable { case today, run }
 
     var selectedTab: Tab = .today
+
+    /// History is no longer a tab — it is pushed from the week chart on
+    /// Today, which is the thing you were already looking at when you wanted
+    /// more of it. This is how anything else (the Run tab's streak badge)
+    /// asks for it.
+    var showsHistory = false
+    /// Settings is a gear in Today's header rather than a tab: it is a place
+    /// you visit occasionally, and the tab bar is for the two things you do
+    /// every morning.
+    var showsSettings = false
+
+    func openHistory() {
+        selectedTab = .today
+        showsHistory = true
+    }
 }
 
 /// The long-lived objects an App Intent needs. Intents are created by the

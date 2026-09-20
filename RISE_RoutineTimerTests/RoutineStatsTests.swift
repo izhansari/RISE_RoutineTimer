@@ -35,6 +35,34 @@ final class RoutineStatsTests: XCTestCase {
         XCTAssertEqual(stats.latest?.activeSeconds, 1200)
     }
 
+    /// Skipping coffee makes a morning twelve minutes quicker than any real
+    /// one. It used to become the best time and drag the average with it.
+    func testPartialRunsDoNotSetTheBestOrMoveTheAverage() {
+        let coffee = StepResult(stepID: UUID(), title: "Coffee", plannedSeconds: 720, actualSeconds: 4, autoAdvanced: false, skipped: true)
+        let stats = RoutineStats(sessions: [
+            session(dayOffset: 0, active: 600, steps: [coffee]),
+            session(dayOffset: -1, active: 1300),
+            session(dayOffset: -2, active: 1100),
+        ], calendar: calendar)
+
+        XCTAssertEqual(stats.count, 3, "it is still a completed run — the streak and the step stats keep it")
+        XCTAssertEqual(stats.partialCount, 1)
+        XCTAssertEqual(stats.bestActiveSeconds, 1100)
+        XCTAssertEqual(stats.averageActiveSeconds, 1200)
+        XCTAssertEqual(stats.currentStreak(today: day(0, hour: 12)), 3)
+    }
+
+    func testTheTrendIsOfFullRunsOnly() {
+        let coffee = StepResult(stepID: UUID(), title: "Coffee", plannedSeconds: 720, actualSeconds: 4, autoAdvanced: false, skipped: true)
+        var sessions: [SessionResult] = []
+        for i in 0..<5 { sessions.append(session(dayOffset: -i, active: 1000)) }
+        for i in 5..<10 { sessions.append(session(dayOffset: -i, active: 1300)) }
+        // Three quick partial mornings in among them change nothing.
+        for i in [0, 3, 7] { sessions.append(session(dayOffset: -i, active: 300, hour: 9, steps: [coffee])) }
+
+        XCTAssertEqual(RoutineStats(sessions: sessions, calendar: calendar).recentTrendSeconds(), -300)
+    }
+
     func testEmptyStats() {
         let stats = RoutineStats(sessions: [], calendar: calendar)
         XCTAssertNil(stats.averageActiveSeconds)

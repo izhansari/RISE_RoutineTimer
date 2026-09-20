@@ -15,13 +15,23 @@
 //  Every slice is a pale tint of how its step went — the amber a step running
 //  over turns the timer, the theme colour for under, grey for on plan — so the
 //  slow steps show before anything is touched. The selected slice goes solid
-//  and grows past the others. Tap a slice, or press and drag round the ring;
-//  it opens on the biggest one, which is the answer most people came for.
+//  and grows past the others. Tap a slice, or step round the ring with the
+//  arrows beside the step's name; it opens on the biggest one, which is the
+//  answer most people came for.
+//
+//  Drawn with SwiftUI shapes, not Swift Charts. The first version was a
+//  `Chart` of `SectorMark`s, and selecting a slice played two transitions:
+//  Charts does not interpolate a mark's radius and colour, it takes the
+//  changed mark out and puts it back — so the new slice vanished, faded in
+//  grown but still pale, the old one sat there solid for the whole half
+//  second, and the colours swapped in one frame at the end. A `Shape` with an
+//  animatable radius and an animated fill does the one movement that was
+//  meant. Charts was already not doing the hit-testing (it ignores a plain
+//  tap inside a scroll view), so nothing was lost by dropping it.
 //
 //  The maths is `RunComposition`.
 //
 
-import Charts
 import SwiftUI
 import UIKit
 
@@ -36,40 +46,46 @@ struct RunRingView: View {
     /// Kept as a choice rather than resolved on appear so a run corrected
     /// from EDIT re-opens on whatever is biggest *now*.
     @State private var chosen: Int?
-    /// Where on the ring the finger is, in seconds into the run. Swift Charts
-    /// clears it the moment the touch ends, so it is only ever an input.
-    @State private var touch: Double?
 
     private let diameter: CGFloat = 214
     private let innerRatio = 0.6
+    private let restingRatio = 0.89
 
     private var selected: RunComposition.Slice? {
         let index = chosen ?? composition.largestIndex
         return composition.slices.first { $0.index == index }
     }
 
+    private var ringSize: CGSize { CGSize(width: diameter, height: diameter) }
+
     var body: some View {
         let selected = selected
+        let total = Double(max(1, composition.totalSeconds))
 
         VStack(spacing: 14) {
             ZStack {
-                Chart(composition.slices) { slice in
+                ForEach(composition.slices) { slice in
                     let isSelected = slice.index == selected?.index
-                    SectorMark(
-                        angle: .value("Took", Double(max(0, slice.result.actualSeconds))),
-                        innerRadius: .ratio(innerRatio),
-                        outerRadius: .ratio(isSelected ? 1 : 0.89),
-                        angularInset: 1
+                    RingSlice(
+                        start: Double(slice.startSeconds) / total,
+                        end: Double(slice.endSeconds) / total,
+                        innerRatio: innerRatio,
+                        outerRatio: isSelected ? 1 : restingRatio
                     )
-                    .foregroundStyle(color(slice.outcome, selected: isSelected))
+                    .fill(color(slice.outcome, selected: isSelected))
+                    .accessibilityElement()
                     .accessibilityLabel(slice.result.title)
                     .accessibilityValue(
                         "took \(TimeFormatting.spokenDuration(from: slice.result.actualSeconds)), \(Self.percent(slice.share)) of the run"
                     )
+                    .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+                    .accessibilityAction { choose(slice.index) }
                 }
-                .chartLegend(.hidden)
-                .chartAngleSelection(value: $touch)
-                .animation(.snappy(duration: 0.28), value: selected?.index)
+                // One movement: the old slice settles back as the new one
+                // comes forward, colour and radius together. No bounce — a
+                // spring's overshoot on a radius reads as a second, smaller
+                // transition, which is the thing this replaced.
+                .animation(.easeOut(duration: 0.22), value: selected?.index)
 
                 if let selected {
                     centre(selected)
@@ -77,13 +93,17 @@ struct RunRingView: View {
                 }
             }
             .frame(width: diameter, height: diameter)
-            // A tap is hit-tested by hand; the chart's own selection, above,
-            // only wakes after a short press inside a scroll view, and is
-            // kept for pressing and dragging round the ring.
+            .contentShape(Circle())
+            // A tap picks the slice under it, and a tap is the *only* gesture
+            // here. Pressing and dragging round the ring was built and taken
+            // out again: any drag gesture on a view inside a scroll view —
+            // even one gated behind a long press — swallowed swipes that
+            // began on the ring, and the ring sits exactly where a thumb
+            // goes to scroll the summary. The steppers beside the name do
+            // the fine work instead.
             .simultaneousGesture(
                 SpatialTapGesture().onEnded { tap in
-                    let size = CGSize(width: diameter, height: diameter)
-                    guard let index = composition.index(at: tap.location, inRingOf: size, innerRatio: innerRatio) else { return }
+                    guard let index = composition.index(at: tap.location, inRingOf: ringSize, innerRatio: innerRatio) else { return }
                     choose(index)
                 }
             )
@@ -92,10 +112,6 @@ struct RunRingView: View {
             if let selected {
                 caption(selected)
             }
-        }
-        .onChange(of: touch) { _, seconds in
-            guard let seconds, let index = composition.index(atSeconds: seconds) else { return }
-            choose(index)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Where the time went")
@@ -133,7 +149,31 @@ struct RunRingView: View {
     private func caption(_ slice: RunComposition.Slice) -> some View {
         let icon = icons[slice.result.stepID] ?? ""
 
-        return VStack(spacing: 5) {
+        return HStack(spacing: 4) {
+            stepper("chevron.left", label: "Previous step", to: composition.neighbour(of: slice.index, by: -1))
+            captionText(slice, icon: icon)
+            stepper("chevron.right", label: "Next step", to: composition.neighbour(of: slice.index, by: 1))
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    /// Walks the selection one slice round the ring.
+    private func stepper(_ systemName: String, label: String, to index: Int?) -> some View {
+        Button {
+            if let index { choose(index) }
+        } label: {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .frame(width: 40, height: 40)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    private func captionText(_ slice: RunComposition.Slice, icon: String) -> some View {
+        VStack(spacing: 5) {
             HStack(spacing: 7) {
                 if !icon.isEmpty {
                     Text(icon).font(.system(size: 15))
@@ -204,5 +244,52 @@ struct RunRingView: View {
         // Below one percent a rounded "0%" would say the step took nothing.
         if value > 0, value < 1 { return "<1%" }
         return "\(Int(value.rounded()))%"
+    }
+}
+
+// MARK: - One slice
+
+/// A sector of the ring, in turns clockwise from twelve. Only the outer
+/// radius animates; the angles belong to the run and never move.
+///
+/// The gap between slices is a constant width rather than a constant angle,
+/// so it stays a hairline at the rim instead of fanning out — which means the
+/// inset is a different angle at the inner edge than at the outer one.
+nonisolated private struct RingSlice: Shape {
+    var start: Double
+    var end: Double
+    var innerRatio: Double
+    var outerRatio: Double
+    var gap: Double = 2
+
+    var animatableData: Double {
+        get { outerRatio }
+        set { outerRatio = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let radius = Double(min(rect.width, rect.height)) / 2
+        let outer = radius * outerRatio
+        let inner = radius * innerRatio
+        let sweep = (end - start) * 2 * Double.pi
+        guard sweep > 0, outer > inner, inner > 0 else { return Path() }
+
+        // A sliver keeps a fifth of itself rather than being eaten by its
+        // own gaps.
+        let outerInset = min(asin(min(1, gap / 2 / outer)), sweep * 0.4)
+        let innerInset = min(asin(min(1, gap / 2 / inner)), sweep * 0.4)
+
+        let from = start * 2 * Double.pi - Double.pi / 2
+        let to = from + sweep
+        let centre = CGPoint(x: rect.midX, y: rect.midY)
+
+        var path = Path()
+        // `clockwise: false` is clockwise on screen: SwiftUI's y axis points down.
+        path.addArc(center: centre, radius: outer,
+                    startAngle: .radians(from + outerInset), endAngle: .radians(to - outerInset), clockwise: false)
+        path.addArc(center: centre, radius: inner,
+                    startAngle: .radians(to - innerInset), endAngle: .radians(from + innerInset), clockwise: true)
+        path.closeSubpath()
+        return path
     }
 }

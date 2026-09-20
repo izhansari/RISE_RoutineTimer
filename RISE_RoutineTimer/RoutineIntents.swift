@@ -97,7 +97,7 @@ struct MarkAwakeIntent: AppIntent {
             }
         }
 
-        store.recordWake(at: now, existing: logs)
+        store.recordWake(at: now, existing: logs, goalMinutes: MorningSettings.stored().targetWakeMinutes)
         return .result(dialog: "Marked awake at \(TimeFormatting.shortClockTime(from: now)).")
     }
 }

@@ -316,6 +316,17 @@ struct SessionEditView: View {
             }
             .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.14), lineWidth: 1))
 
+            // Giving a skipped step a time says it happened; say so before
+            // Save does it.
+            if step.wasSkipped, dirty, draft.total > 0 {
+                Text("SAVING COUNTS THIS STEP AS DONE, NOT SKIPPED")
+                    .font(.system(size: 9, weight: .semibold))
+                    .tracking(1.3)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .transition(.opacity)
+            }
+
             HStack(spacing: 10) {
                 ReceiptButton(title: "Cancel") {
                     withAnimation(.snappy(duration: 0.32)) { self.draft = nil }

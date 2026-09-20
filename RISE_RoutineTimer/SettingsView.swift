@@ -33,30 +33,37 @@ struct SettingsView: View {
     private var schedule: TargetSchedule { TargetSchedule(targetMinutesAfterMidnight: targetMinutes) }
 
     var body: some View {
-        NavigationStack {
-            List {
-                routineSection
-                timerSection
-                alertsSection
-                wakeGoalSection
-                targetSection
-                #if DEBUG
-                debugSection
-                #endif
-            }
-            .navigationTitle("Settings")
-            .sheet(isPresented: $editingList) {
-                RoutineListView(steps: steps)
-            }
-            .onChange(of: targetMinutes) { _, _ in syncReminder() }
-            .onChange(of: reminderEnabled) { _, _ in syncReminder() }
-            .onChange(of: plannedSeconds) { _, _ in syncReminder() }
+    List {
+            routineSection
+            timerSection
+            alertsSection
+            wakeGoalSection
+            targetSection
+            #if DEBUG
+            debugSection
+            #endif
         }
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
+        .sheet(isPresented: $editingList) {
+            RoutineListView(steps: steps)
+        }
+        .onChange(of: targetMinutes) { _, _ in syncReminder() }
+        .onChange(of: reminderEnabled) { _, _ in syncReminder() }
+        .onChange(of: plannedSeconds) { _, _ in syncReminder() }
     }
 
     #if DEBUG
     private var debugSection: some View {
         Section {
+            // Throwaway prototypes for the History / Today redesign — see
+            // DesignLab.swift. Remove with that file once a direction is built.
+            NavigationLink {
+                DesignLabView()
+            } label: {
+                Label("Design Mockups", systemImage: "rectangle.on.rectangle.angled")
+            }
             Button {
                 DebugSeed.populate(
                     context: modelContext,

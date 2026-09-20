@@ -3,9 +3,10 @@
 //  RISE_RoutineTimer
 //
 //  The landing screen, and the app's answer to "am I getting better or worse?"
-//  Modelled on MorningCheckin's HomeScreen: the day's three moments on a
-//  timeline, today's numbers next to a rolling baseline, the weekly budgets,
-//  and one insight at a time.
+//  Descended from MorningCheckin's HomeScreen: this morning drawn against the
+//  week (`MorningColumnsChart`), the one number that matters right now, the
+//  finished morning against a rolling baseline, the weekly budgets, and one
+//  insight at a time.
 //
 //  It also owns the wake CTA, because waking up happens before there is any
 //  routine to be on the Run tab for.
@@ -22,7 +23,6 @@ import SwiftUI
 /// app's. Waking is scored on the same green / amber / red the running timer
 /// uses for pace, so "late" looks the same wherever it appears.
 private enum MorningInk {
-    static let activation = Color(hex: 0x4A32DC)   // wake → routine start
     static let good       = Color(hex: 0x0FA057)
     static let warn       = Color(hex: 0xE8890A)
     static let bad        = Color(hex: 0xDB2118)
@@ -48,6 +48,7 @@ private enum BaselinePeriod: String, CaseIterable, Identifiable {
 struct TodayView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(RoutineEngine.self) private var engine
+    @Environment(AppNavigation.self) private var navigation
 
     @Query private var logs: [MorningLog]
     @Query(sort: \RoutineSession.startedAt, order: .reverse) private var sessions: [RoutineSession]
@@ -58,9 +59,10 @@ struct TodayView: View {
     @AppStorage("todayBaselinePeriod") private var baselineRaw = BaselinePeriod.sevenDay.rawValue
     @AppStorage(FillTheme.storageKey) private var fillThemeRaw = FillTheme.default.rawValue
 
-    @State private var insightIndex = 0
     @State private var editingWake = false
     @State private var confirmingUndoWake = false
+    /// The day picked out on the week chart, if any.
+    @State private var selectedDay: Int?
 
     /// Steps to hand the engine when the routine is started from here.
     let steps: [RoutineStep]
@@ -82,6 +84,8 @@ struct TodayView: View {
     private var baseline: BaselinePeriod {
         BaselinePeriod(rawValue: baselineRaw) ?? .sevenDay
     }
+
+    private var tint: Color { (FillTheme(rawValue: fillThemeRaw) ?? .default).color }
 
     private var today: MorningRecord {
         metrics.record(on: Date()) ?? MorningRecord(day: Calendar.current.startOfDay(for: Date()))
@@ -112,26 +116,56 @@ struct TodayView: View {
 
     // MARK: - Body
 
+    /// One screen, no scrolling, the button always under the thumb: the week
+    /// with today growing on the end of it, the one number that matters right
+    /// now, and both weekly budgets with the one you are spending alive.
+    ///
+    /// It was a scrolling stack of four cards — timeline, performance tiles,
+    /// budgets, insight — which meant the button moved depending on how far
+    /// down you had scrolled, and this screen is used half-awake. The insight
+    /// card moved to History, which is now a push from the week chart rather
+    /// than a tab of its own.
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                // One ticking clock drives every live value on the screen.
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    let now = context.date
-                    VStack(spacing: 14) {
-                        header
-                        timelineCard(now: now)
-                        performanceCard(now: now)
-                        budgetCard(now: now)
-                        insightCard(now: now)
-                    }
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, 28)
+        @Bindable var navigation = navigation
+
+        return NavigationStack {
+            // One ticking clock drives every live value on the screen.
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let now = context.date
+                VStack(alignment: .leading, spacing: 0) {
+                    header
+
+                    // The chart takes the slack rather than a spacer: an
+                    // empty third of the screen was doing nothing, and the
+                    // mornings were squeezed into 124pt where a day's whole
+                    // shape had to fit.
+                    weekCard(now: now)
+                        .padding(.top, 12)
+                        .frame(maxHeight: .infinity)
+
+                    stateBlock(now: now)
+                        .padding(.top, 14)
+
+                    budgetBlock(now: now)
+                        .padding(.top, 16)
+                        .padding(.bottom, 4)
+                }
+                .padding(.horizontal, 20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .safeAreaInset(edge: .bottom) {
+                    ctaButton
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 6)
                 }
             }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("Today")
-            .navigationBarTitleDisplayMode(.inline)
+            .background(Color(.systemBackground))
+            .toolbar(.hidden, for: .navigationBar)
+            .navigationDestination(isPresented: $navigation.showsHistory) {
+                HistoryView(steps: steps)
+            }
+            .navigationDestination(isPresented: $navigation.showsSettings) {
+                SettingsView(steps: steps)
+            }
             .sheet(isPresented: $editingWake) { wakeEditor }
             .receiptDialog(
                 isPresented: $confirmingUndoWake,
@@ -140,7 +174,8 @@ struct TodayView: View {
                 confirmTitle: "Undo it",
                 cancelTitle: "Keep it",
                 onConfirm: {
-                    MorningLogStore(context: modelContext).setWake(nil, on: Date(), existing: logs)
+                    MorningLogStore(context: modelContext)
+                        .setWake(nil, on: Date(), existing: logs, goalMinutes: settings.targetWakeMinutes)
                 }
             )
         }
@@ -148,21 +183,30 @@ struct TodayView: View {
 
     // MARK: - Header
 
+    /// One line: the greeting, the goal, and the way into Settings. Settings
+    /// used to be a tab; it is somewhere you go now and then, and the tab bar
+    /// is better spent on the two things you do every morning.
     private var header: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        HStack(alignment: .center, spacing: 10) {
             Text(greeting)
-                .font(.system(size: 26, weight: .bold))
-            Text(Date().formatted(.dateTime.weekday(.wide).month(.wide).day()))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Text("GOAL WAKE · \(clockOfDay(settings.targetWakeMinutes))")
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(1.6)
-                .foregroundStyle(.tertiary)
-                .padding(.top, 2)
+                .font(.system(size: 25, weight: .bold))
+            Spacer(minLength: 4)
+            CardLabel("GOAL \(clockOfDay(settings.targetWakeMinutes))")
+                .lineLimit(1)
+                .fixedSize()
+            Button {
+                navigation.showsSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 17))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Settings")
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 4)
+        .padding(.top, 8)
     }
 
     private var greeting: String {
@@ -174,40 +218,175 @@ struct TodayView: View {
         }
     }
 
-    // MARK: - Timeline
+    // MARK: - The week
 
-    @ViewBuilder
-    private func timelineCard(now: Date) -> some View {
-        if today.wakeAt != nil {
-            Card {
-                HStack {
-                    CardLabel("TODAY")
-                    Spacer()
-                    Button("EDIT") { editingWake = true }
-                        .font(.system(size: 10, weight: .semibold))
-                        .tracking(1.2)
-                        .foregroundStyle(.secondary)
+    /// The last seven mornings with today's column still growing.
+    ///
+    /// Only the `ALL MORNINGS ›` button goes to History — the chart itself
+    /// belongs to the chart: tap or drag across it to read any day of the
+    /// week, exactly as on History's own. The whole card used to be one big
+    /// button, so touching the chart at all threw you onto another screen.
+    private func weekCard(now: Date) -> some View {
+        let columns = weekColumns(now: now)
+        let goal = settings.targetWakeMinutes
+        let edge = liveEdge(nowMinutes: MorningColumn.minutes(now, into: Calendar.current.startOfDay(for: now)), now: now)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                // Swaps to the selected day's date. One line, always: left
+                // to wrap it pushed the chart down, which is the whole thing
+                // this layout is trying not to do.
+                CardLabel(selectedHeader(columns: columns, now: now))
+                    .lineLimit(1)
+                    .fixedSize()
+                Spacer()
+                Button {
+                    navigation.showsHistory = true
+                } label: {
+                    HStack(spacing: 2) {
+                        Text("ALL MORNINGS")
+                            .font(.system(size: 10, weight: .semibold))
+                            .tracking(1.8)
+                        Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.leading, 12)
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
                 }
-                DayTimeline(
-                    goal: settings.targetWake(on: today.wakeAt ?? now),
-                    wake: today.wakeAt,
-                    start: effectiveStart,
-                    end: today.routineEndAt,
-                    now: now,
-                    isRunning: engine.hasActiveRun,
-                    routineColor: (FillTheme(rawValue: fillThemeRaw) ?? .default).color
-                )
-                .padding(.top, 14)
+                .buttonStyle(.plain)
+                .accessibilityLabel("All mornings")
+                .accessibilityHint("Opens History")
             }
+            GeometryReader { geo in
+                MorningColumnsChart(
+                    columns: columns,
+                    scale: ClockScale(columns: columns, goal: goal, now: edge, keeping: columns.last),
+                    tint: tint,
+                    // The chart draws its day labels under the plot; this is
+                    // the plot's share of whatever height the card got.
+                    height: max(110, geo.size.height - MorningColumnsChart.labelStripHeight),
+                    selection: $selectedDay,
+                    liveIndex: columns.count - 1,
+                    now: edge,
+                    fadesHistory: true,
+                    annotatesSelection: true,
+                    label: { Calendar.current.isDate($0.day, inSameDayAs: now) ? "TODAY" : Self.dayNumber.string(from: $0.day) }
+                )
+            }
+        }
+        .padding(12)
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
+    }
+
+    /// The week's columns, with a run in progress patched in from the engine
+    /// — it has not been written to history yet.
+    private func weekColumns(now: Date) -> [MorningColumn] {
+        let dayStart = Calendar.current.startOfDay(for: now)
+        var columns = MorningColumn.window(
+            records: metrics.records, endingOn: now, days: 8,
+            currentGoal: settings.targetWakeMinutes
+        )
+        if engine.hasActiveRun, let start = engine.routineStartDate, var live = columns.last {
+            live.start = MorningColumn.minutes(start, into: dayStart)
+            live.end = nil
+            live.pausedUntil = nil
+            columns[columns.count - 1] = live
+        }
+        return columns
+    }
+
+    /// "THIS WEEK", or the day you have picked out.
+    private func selectedHeader(columns: [MorningColumn], now: Date) -> String {
+        guard let index = selectedDay, columns.indices.contains(index) else { return "THIS WEEK" }
+        let column = columns[index]
+        if Calendar.current.isDate(column.day, inSameDayAs: now) { return "TODAY" }
+        // No "nothing logged" suffix — an empty column already says it, and
+        // the extra words wrap.
+        return Self.longDay.string(from: column.day).uppercased()
+    }
+
+    /// How far today's column has grown. Nil once the morning is over — and
+    /// nil outside the morning altogether, so an unlogged day at 9pm does not
+    /// draw a fourteen-hour snooze down the chart.
+    private func liveEdge(nowMinutes: Int, now: Date) -> Int? {
+        let window = MorningSettings.morningWindow
+        switch stage {
+        case .awake:
+            let since = now.timeIntervalSince(settings.targetWake(on: now))
+            return since >= 0 && since <= window ? nowMinutes : nil
+        case .start:
+            guard let wake = today.wakeAt, now.timeIntervalSince(wake) <= window else { return nil }
+            return nowMinutes
+        case .running:
+            return nowMinutes
+        case .complete:
+            return nil
         }
     }
 
-    // MARK: - Performance
+    // MARK: - Right now
 
-    private func performanceCard(now: Date) -> some View {
-        Card {
+    /// One number, for whichever part of the morning you are in — or, once it
+    /// is over, the comparison, which becomes the headline in its place.
+    @ViewBuilder
+    private func stateBlock(now: Date) -> some View {
+        switch stage {
+        case .awake:
+            let goal = settings.targetWake(on: now)
+            let since = now.timeIntervalSince(goal)
+            let usual = metrics.averageWakeMinutes(days: 7, now: now).map { "You're usually up by \(clockOfDay($0).lowercased())." }
+            if since < 0 {
+                bigNumber("UNTIL YOUR \(clockOfDay(settings.targetWakeMinutes)) GOAL", elapsed(-since), note: usual)
+            } else if since <= MorningSettings.morningWindow {
+                bigNumber("PAST YOUR \(clockOfDay(settings.targetWakeMinutes)) GOAL", "+" + elapsed(since), color: MorningInk.warn, note: usual)
+            } else {
+                bigNumber("NO WAKE TIME TODAY", "--:--", color: Color(.tertiaryLabel), note: nil)
+            }
+        case .start:
+            let wake = today.wakeAt ?? now
+            let usual = metrics.rollingAverage(.activation, days: 7, now: now, excluding: now)
+                .map { "You usually start \($0) min after waking." }
+            bigNumber("SINCE YOU WOKE AT \(TimeFormatting.shortClockTime(from: wake).uppercased())",
+                      elapsed(now.timeIntervalSince(wake)), note: usual)
+        case .running:
+            bigNumber("INTO THE ROUTINE", elapsed(TimeInterval(engine.activeElapsedSeconds)),
+                      color: tint,
+                      note: "Done at \(TimeFormatting.shortClockTime(from: engine.projectedEndDate)) on plan.")
+        case .complete:
+            comparisonBlock(now: now)
+        }
+    }
+
+    private func bigNumber(_ label: String, _ value: String, color: Color = .primary, note: String?) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            CardLabel(label)
+            Text(value)
+                .font(digitFont(50))
+                .monospacedDigit()
+                .contentTransition(.identity)
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+            if let note {
+                Text(note)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// The finished morning against a baseline you pick. Each figure carries
+    /// a short rule under it — the app's own hard-rule idiom — coloured by
+    /// whether the morning beat that baseline, with the baseline's own value
+    /// spelled out underneath so the colour is never the only thing saying it.
+    private func comparisonBlock(now: Date) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
-                CardLabel("PERFORMANCE")
+                CardLabel("THIS MORNING VS")
                 Spacer()
                 Menu {
                     Picker("Baseline", selection: $baselineRaw) {
@@ -220,127 +399,107 @@ struct TodayView: View {
                         Text(baseline.title)
                         Image(systemName: "chevron.up.chevron.down").font(.system(size: 8))
                     }
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.primary)
                 }
             }
-
-            HStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
                 ForEach(MorningMetrics.Metric.allCases) { metric in
-                    PerformanceTile(
+                    StatCompare(
                         title: metric.title.uppercased(),
-                        value: liveValueText(metric, now: now),
-                        comparison: comparison(metric, now: now)
+                        value: metrics.value(metric, for: today),
+                        baseline: baselineValue(metric, now: now),
+                        signed: metric == .snooze,
+                        better: tint
                     )
                 }
             }
-            .padding(.top, 12)
-
-            ctaButton
-                .padding(.top, 12)
         }
     }
 
-    /// Live where it can be — the tile counts up while you are in the phase it
-    /// measures, then freezes on the recorded value.
-    private func liveValueText(_ metric: MorningMetrics.Metric, now: Date) -> String? {
-        switch metric {
-        case .snooze:
-            guard let wake = today.wakeAt else {
-                // Still in bed: count up from the target so the cost of lying
-                // there is visible. Bounded, because an unlogged morning at
-                // 9pm is not a fourteen-hour snooze — it is just unlogged.
-                let target = settings.targetWake(on: now)
-                let since = now.timeIntervalSince(target)
-                guard since >= 0, since <= MorningSettings.morningWindow else { return nil }
-                return elapsed(since, signed: true)
-            }
-            return elapsed(wake.timeIntervalSince(settings.targetWake(on: wake)), signed: true)
-        case .activation:
-            guard let wake = today.wakeAt else { return nil }
-            guard let start = effectiveStart else { return elapsed(now.timeIntervalSince(wake)) }
-            return elapsed(start.timeIntervalSince(wake))
-        case .duration:
-            guard let start = effectiveStart else { return nil }
-            guard let end = today.routineEndAt, !engine.hasActiveRun else {
-                return elapsed(now.timeIntervalSince(start))
-            }
-            return elapsed(end.timeIntervalSince(start))
-        }
-    }
-
-    /// Today's finished value against the chosen baseline.
-    private func comparison(_ metric: MorningMetrics.Metric, now: Date) -> Comparison? {
-        guard stage == .complete else { return nil }
-        guard let todayValue = metrics.value(metric, for: today) else { return nil }
-        let base: Int?
+    private func baselineValue(_ metric: MorningMetrics.Metric, now: Date) -> Int? {
         switch baseline {
         case .last:
-            base = metrics.previousValue(metric, now: now)
+            return metrics.previousValue(metric, now: now)
         case .sevenDay, .thirtyDay:
-            base = metrics.rollingAverage(metric, days: baseline.days, now: now, excluding: now)
+            return metrics.rollingAverage(metric, days: baseline.days, now: now, excluding: now)
         }
-        guard let base else { return nil }
-        return Comparison(deltaMinutes: base - todayValue, metric: metric)
     }
 
     // MARK: - Budgets
 
-    private func budgetCard(now: Date) -> some View {
-        Card {
-            HStack(alignment: .top, spacing: 18) {
-                VStack(alignment: .leading, spacing: 12) {
-                    CardLabel("WEEKLY BUDGET")
-                    BudgetBar(
-                        title: "Snooze",
-                        used: metrics.weeklyBudgetUsed(.snooze, now: now),
-                        budget: settings.snoozeBudgetMinutes
-                    )
-                    BudgetBar(
-                        title: "Activation",
-                        used: metrics.weeklyBudgetUsed(.activation, now: now),
-                        budget: settings.activationBudgetMinutes
-                    )
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                VStack(alignment: .leading, spacing: 12) {
-                    CardLabel("7-DAY")
-                    MiniStat("Wake", metrics.averageWakeMinutes(days: 7, now: now).map(clockOfDay) ?? "—")
-                    MiniStat("Activation", metrics.rollingAverage(.activation, days: 7, now: now).map { "\($0) min" } ?? "—")
-                    MiniStat("Spread", metrics.wakeConsistencyMinutes(days: 7, now: now).map { "±\($0) min" } ?? "—")
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
+    /// Both budgets, always on screen — and the one you are spending right
+    /// now is visibly filling: its today-portion stands taller, breathes, and
+    /// carries a NOW tag, while the other sits quiet.
+    ///
+    /// They used to be a card at the foot of a scrolling page, which meant
+    /// you read them afterwards like a receipt. A budget is only worth
+    /// showing while it can still change what you do: watching the snooze
+    /// pips fill from bed is a reason to get up.
+    private func budgetBlock(now: Date) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            budgetRow(.snooze, title: "Snooze", budget: settings.snoozeBudgetMinutes, now: now)
+            budgetRow(.activation, title: "Activation", budget: settings.activationBudgetMinutes, now: now)
         }
     }
 
-    // MARK: - Insight
-
-    private func insightCard(now: Date) -> some View {
-        let lines = metrics.insights(now: now)
-        let index = lines.isEmpty ? 0 : insightIndex % lines.count
-        return Button {
-            insightIndex += 1
-        } label: {
-            Card {
-                CardLabel("INSIGHT")
-                Text(lines.isEmpty ? "Keep logging." : lines[index])
-                    .font(.subheadline)
-                    .foregroundStyle(.primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 8)
-                if lines.count > 1 {
-                    Text("TAP FOR NEXT")
-                        .font(.system(size: 9, weight: .semibold))
-                        .tracking(1.4)
-                        .foregroundStyle(.tertiary)
-                        .padding(.top, 8)
-                }
-            }
+    /// Which budget is being spent this second. Before the wake goal the
+    /// answer is neither: you cannot be overspending snooze at 2 AM.
+    private func liveBudget(now: Date) -> MorningMetrics.Metric? {
+        switch stage {
+        case .awake: return now >= settings.targetWake(on: now) ? .snooze : nil
+        case .start: return .activation
+        case .running, .complete: return nil
         }
-        .buttonStyle(.plain)
     }
+
+    /// Today's own contribution: live while you are spending it, the recorded
+    /// figure once it is settled. Only overruns count, as the budget does.
+    private func todaySpend(_ metric: MorningMetrics.Metric, now: Date) -> Int {
+        switch metric {
+        case .snooze:
+            if let wake = today.wakeAt {
+                return max(0, Int((wake.timeIntervalSince(settings.targetWake(on: wake)) / 60).rounded(.down)))
+            }
+            let since = now.timeIntervalSince(settings.targetWake(on: now))
+            guard since >= 0, since <= MorningSettings.morningWindow else { return 0 }
+            return Int(since / 60)
+        case .activation:
+            guard let wake = today.wakeAt else { return 0 }
+            if let start = effectiveStart, start >= wake {
+                return max(0, Int((start.timeIntervalSince(wake) / 60).rounded(.down)))
+            }
+            let since = now.timeIntervalSince(wake)
+            guard since >= 0, since <= MorningSettings.morningWindow else { return 0 }
+            return Int(since / 60)
+        case .duration:
+            return 0
+        }
+    }
+
+    private func budgetRow(_ metric: MorningMetrics.Metric, title: String, budget: Int, now: Date) -> some View {
+        BudgetPips(
+            title: title,
+            spentBefore: metrics.weeklyBudgetUsed(metric, now: now, excluding: now),
+            today: todaySpend(metric, now: now),
+            budget: budget,
+            isLive: liveBudget(now: now) == metric,
+            warn: MorningInk.warn,
+            over: MorningInk.bad
+        )
+    }
+
+    private static let dayNumber: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "d"
+        return f
+    }()
+
+    private static let longDay: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEE d MMM"
+        return f
+    }()
 
     // MARK: - CTA
 
@@ -349,7 +508,8 @@ struct TodayView: View {
         switch stage {
         case .awake:
             cta("I'M AWAKE", icon: "sun.horizon.fill") {
-                MorningLogStore(context: modelContext).recordWake(at: Date(), existing: logs)
+                MorningLogStore(context: modelContext)
+                    .recordWake(at: Date(), existing: logs, goalMinutes: settings.targetWakeMinutes)
             }
         case .start:
             VStack(spacing: 10) {
@@ -409,7 +569,10 @@ struct TodayView: View {
                         "Woke up at",
                         selection: Binding(
                             get: { today.wakeAt ?? Date() },
-                            set: { MorningLogStore(context: modelContext).setWake($0, on: Date(), existing: logs) }
+                            set: {
+                                MorningLogStore(context: modelContext)
+                                    .setWake($0, on: Date(), existing: logs, goalMinutes: settings.targetWakeMinutes)
+                            }
                         ),
                         displayedComponents: .hourAndMinute
                     )
@@ -436,6 +599,17 @@ struct TodayView: View {
         return TimeFormatting.shortClockTime(from: date).uppercased()
     }
 
+    /// "42 MIN" under the hour, "1:20" beyond it — the resolution the
+    /// finished figures and their comparison are both read at, and the one
+    /// History reports. Seconds-precise, a morning that began five hours
+    /// before the goal printed a nine-character `−5:09:57` that ran into the
+    /// next column.
+    nonisolated static func minuteText(_ minutes: Int, signed: Bool = false) -> String {
+        let sign = signed && minutes > 0 ? "+" : (minutes < 0 ? "−" : "")
+        let size = abs(minutes)
+        return size < 60 ? "\(sign)\(size) MIN" : sign + "\(size / 60):" + String(format: "%02d", size % 60)
+    }
+
     /// `MM:SS` under an hour, `H:MM:SS` beyond.
     private func elapsed(_ interval: TimeInterval, signed: Bool = false) -> String {
         let negative = interval < 0
@@ -450,42 +624,7 @@ struct TodayView: View {
     }
 }
 
-// MARK: - Comparison
-
-private struct Comparison {
-    /// Positive means today beat the baseline.
-    let deltaMinutes: Int
-    let metric: MorningMetrics.Metric
-
-    var isBetter: Bool { deltaMinutes > 0 }
-    var isNeutral: Bool { deltaMinutes == 0 }
-
-    var text: String {
-        if isNeutral { return "Same" }
-        let word = metric == .duration ? (isBetter ? "faster" : "slower") : (isBetter ? "better" : "worse")
-        return "\(abs(deltaMinutes))m \(word)"
-    }
-
-    var color: Color {
-        if isNeutral { return .secondary }
-        return isBetter ? MorningInk.good : MorningInk.bad
-    }
-}
-
 // MARK: - Pieces
-
-private struct Card<Content: View>: View {
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            content
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
-    }
-}
 
 private struct CardLabel: View {
     let text: String
@@ -499,275 +638,175 @@ private struct CardLabel: View {
     }
 }
 
-private struct MiniStat: View {
+/// One finished figure against its baseline: the value, a short rule
+/// coloured by whether the morning beat it, and the baseline spelled out —
+/// so the colour is never the only thing carrying the comparison.
+private struct StatCompare: View {
     let title: String
-    let value: String
-    init(_ title: String, _ value: String) { self.title = title; self.value = value }
+    let value: Int?
+    let baseline: Int?
+    let signed: Bool
+    /// The user's theme colour, used for "you beat it".
+    let better: Color
+
+    /// A minute either way is rounding, not a difference.
+    private static let tolerance = 1
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
+        let delta = value.flatMap { v in baseline.map { v - $0 } }
+        let same = delta.map { abs($0) <= Self.tolerance } ?? false
+        let beat = (delta ?? 0) < 0
+        let color: Color = delta == nil ? .secondary : same ? .secondary : (beat ? better : Color(hex: 0xE8890A))
+
+        return VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.caption2)
+                .font(.system(size: 9, weight: .semibold))
+                .tracking(1.4)
                 .foregroundStyle(.tertiary)
-            Text(value)
-                .font(analogFont(16))
-                .monospacedDigit()
-        }
-    }
-}
-
-private struct PerformanceTile: View {
-    let title: String
-    let value: String?
-    let comparison: Comparison?
-
-    var body: some View {
-        VStack(spacing: 6) {
-            Text(value ?? "--:--")
-                .font(analogFont(21))
+            Text(value.map { TodayView.minuteText($0, signed: signed) } ?? "—")
+                .font(analogFont(19))
                 .monospacedDigit()
                 .contentTransition(.identity)
                 .foregroundStyle(value == nil ? .tertiary : .primary)
                 .lineLimit(1)
-                .minimumScaleFactor(0.55)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 13)
-                .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 10))
-
-            Text(title)
-                .font(.system(size: 10, weight: .medium))
-                .tracking(0.8)
-                .foregroundStyle(value == nil ? .tertiary : .secondary)
-
-            Text(comparison?.text ?? " ")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(comparison?.color ?? .clear)
+                .minimumScaleFactor(0.5)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Rectangle()
+                .fill(color)
+                .frame(width: 26, height: 2)
+                .opacity(delta == nil ? 0.25 : 1)
+            Text(caption(delta: delta, same: same, beat: beat))
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
+    }
+
+    private func caption(delta: Int?, same: Bool, beat: Bool) -> String {
+        guard let baseline else { return "no baseline yet" }
+        let base = TodayView.minuteText(baseline, signed: signed)
+        guard let delta, !same else { return "same as \(base)" }
+        return "\(beat ? "−" : "+")\(abs(delta)) vs \(base)"
     }
 }
 
-private struct BudgetBar: View {
+/// A weekly budget as one pip per five minutes, in the app's own dot-matrix
+/// register: the week already spent, then today's share, then what is left.
+///
+/// While the budget is genuinely being spent, today's pips breathe. Three
+/// things about that were wrong first time and are worth not repeating:
+///
+///   * **Nothing moves.** Live pips used to be taller than the rest, and the
+///     `repeatForever` animation — sitting inside a `TimelineView` that
+///     rebuilds this whole screen every second — re-animated that height on
+///     every rebuild. The pip visibly grew and shrank on its own.
+///   * **The breath comes from a clock, not an implicit animation.** A
+///     `repeatForever` inside a per-second rebuild is unpredictable; a value
+///     derived from the current time is not, and it stops dead when it
+///     should.
+///   * **It only breathes when there is something to breathe about.** Before
+///     the wake goal you are not spending snooze at all, and a blinking pip
+///     on an empty budget is just a fault light.
+///
+/// Motion is never the only cue: the live row keeps full opacity, its label
+/// lights up and it carries a NOW tag, so the state survives Reduce Motion,
+/// colour-blindness and a glance from across the room.
+private struct BudgetPips: View {
     let title: String
-    let used: Int
+    let spentBefore: Int
+    let today: Int
     let budget: Int
+    let isLive: Bool
+    let warn: Color
+    let over: Color
 
-    private var remaining: Int { budget - used }
-    private var fraction: Double { budget <= 0 ? 0 : min(Double(used) / Double(budget), 1) }
-    private var isOver: Bool { remaining < 0 }
+    /// Minutes per pip. Five keeps a 60-minute budget to twelve marks, which
+    /// fits the width and still reads as countable.
+    private static let perPip = 5
+    private static let pipHeight: CGFloat = 13
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(title)
-                    .font(.system(size: 12, weight: .medium))
-                Spacer()
-                Text(isOver ? "\(abs(remaining)) over" : "\(used) min")
-                    .font(.system(size: 10))
-                    .monospacedDigit()
-                    .foregroundStyle(isOver ? MorningInk.bad : .secondary)
-            }
-            Capsule()
-                .fill(Color(.tertiarySystemFill))
-                .frame(height: 12)
-                .overlay(alignment: .leading) {
-                    GeometryReader { geo in
-                        Capsule()
-                            .fill(isOver ? MorningInk.bad : Color.secondary)
-                            .frame(width: geo.size.width * fraction)
-                    }
-                }
-                .clipShape(Capsule())
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title) budget, \(used) of \(budget) minutes used")
-    }
-}
+    private var spent: Int { spentBefore + today }
+    private var isOver: Bool { spent > budget }
+    /// Live *and* actually spending: today has put something on the board.
+    private var isBreathing: Bool { isLive && today > 0 }
 
-// MARK: - Day timeline
-
-/// The four moments of the morning on a real time axis: the goal, when you
-/// actually woke, when the routine started, and when it ended.
-private struct DayTimeline: View {
-    let goal: Date
-    let wake: Date?
-    let start: Date?
-    let end: Date?
-    let now: Date
-    let isRunning: Bool
-    /// The routine leg is drawn in whatever colour the timer fills with, so
-    /// the two screens agree about what "the routine" looks like.
-    let routineColor: Color
-
-    private let trackY: CGFloat = 30
-    private let padding: TimeInterval = 20 * 60
-
-    /// The visible window, widened to at least 90 minutes so two events a
-    /// minute apart don't sit on top of each other.
-    private var bounds: (start: Date, end: Date) {
-        var points = [goal, now]
-        points.append(contentsOf: [wake, start, end].compactMap { $0 })
-        var lower = (points.min() ?? goal).addingTimeInterval(-padding)
-        var upper = (points.max() ?? goal).addingTimeInterval(padding)
-        let minimum: TimeInterval = 90 * 60
-        if upper.timeIntervalSince(lower) < minimum {
-            let mid = lower.addingTimeInterval(upper.timeIntervalSince(lower) / 2)
-            lower = mid.addingTimeInterval(-minimum / 2)
-            upper = mid.addingTimeInterval(minimum / 2)
-        }
-        return (lower, upper)
-    }
-
-    private func fraction(_ date: Date) -> Double {
-        let (lower, upper) = bounds
-        let span = upper.timeIntervalSince(lower)
-        guard span > 0 else { return 0 }
-        return min(1, max(0, date.timeIntervalSince(lower) / span))
-    }
-
-    private var wakeColor: Color {
-        guard let wake else { return .secondary }
-        let late = wake.timeIntervalSince(goal) / 60
-        if late <= 0 { return MorningInk.good }
-        if late <= 30 { return MorningInk.warn }
-        return MorningInk.bad
+    private var color: Color {
+        if isOver { return over }
+        if budget > 0, spent > budget * 3 / 4 { return warn }
+        return .primary
     }
 
     var body: some View {
-        GeometryReader { geo in
-            let width = geo.size.width
-
-            ZStack(alignment: .topLeading) {
-                // Baseline
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.2))
-                    .frame(height: 1)
-                    .offset(y: trackY)
-
-                // Hour ticks, thinned so the labels never run together.
-                ForEach(hourTicks, id: \.self) { tick in
-                    Text(TimeFormatting.shortClockTime(from: tick))
-                        .font(.system(size: 8))
-                        .foregroundStyle(.tertiary)
-                        .fixedSize()
-                        .position(x: fraction(tick) * width, y: 6)
-                }
-
-                // Activation segment, then the routine segment.
-                if let wake, let start, start >= wake {
-                    segment(from: wake, to: start, width: width, color: MorningInk.activation)
-                }
-                if let start {
-                    segment(from: start, to: end ?? (isRunning ? now : start), width: width, color: routineColor)
-                }
-
-                dot(at: goal, width: width, color: .secondary, filled: false)
-                if let wake { dot(at: wake, width: width, color: wakeColor, filled: true) }
-                if let start { dot(at: start, width: width, color: MorningInk.activation, filled: true) }
-                if let end { dot(at: end, width: width, color: routineColor, filled: true) }
-
-                // Captions drop to a second row when they would collide, so a
-                // wake and a finish minutes apart stay readable.
-                ForEach(layoutCaptions(width: width)) { caption in
-                    captionView(caption)
-                }
+        VStack(alignment: .leading, spacing: 6) {
+            header
+            // Paused unless something is being spent, so a still screen
+            // costs nothing.
+            TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: !isBreathing)) { context in
+                pips(breath: Self.breath(at: context.date))
             }
         }
-        .frame(height: 104)
+        .opacity(isLive ? 1 : 0.55)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title) budget")
+        .accessibilityValue(
+            (isOver ? "\(spent - budget) minutes over" : "\(budget - spent) of \(budget) minutes left")
+            + (isBreathing ? ", being spent now" : "")
+        )
     }
 
-    /// A time label under the axis, already positioned and row-assigned.
-    struct TimelineCaption: Identifiable {
-        let id: String
-        let label: String
-        let date: Date
-        var x: CGFloat
-        let color: Color
-        var row: Int = 0
+    private var header: some View {
+        HStack(spacing: 6) {
+            Text(title.uppercased())
+                .font(.system(size: 9, weight: .semibold))
+                .tracking(1.6)
+                .foregroundStyle(isLive ? color : .secondary)
+            if isLive {
+                Text("NOW")
+                    .font(.system(size: 7, weight: .bold))
+                    .tracking(0.8)
+                    .foregroundStyle(Color(.systemBackground))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1.5)
+                    .background(color, in: Capsule())
+            }
+            Spacer()
+            Text(isOver ? "\(spent - budget) OVER" : "\(budget - spent) LEFT")
+                .font(.system(size: 9, weight: .semibold))
+                .tracking(1.2)
+                .foregroundStyle(isOver ? color : .secondary)
+                .contentTransition(.identity)
+        }
     }
 
-    /// Minimum horizontal gap two captions need before one is pushed down.
-    private static let captionGap: CGFloat = 74
+    private func pips(breath: Double) -> some View {
+        let total = max(1, max(budget, spent) / Self.perPip)
+        let filledBefore = spentBefore / Self.perPip
+        let filledNow = spent / Self.perPip
 
-    private func layoutCaptions(width: CGFloat) -> [TimelineCaption] {
-        let inset: CGFloat = 26
-        var items: [TimelineCaption] = [
-            TimelineCaption(id: "goal", label: "GOAL", date: goal, x: fraction(goal) * width, color: .secondary)
-        ]
-        if let wake {
-            items.append(TimelineCaption(id: "wake", label: "WOKE", date: wake, x: fraction(wake) * width, color: wakeColor))
-        }
-        if let end {
-            items.append(TimelineCaption(id: "end", label: "DONE", date: end, x: fraction(end) * width, color: routineColor))
-        }
-
-        items.sort { $0.x < $1.x }
-
-        // Clamp into the card, then push a label to the second row whenever it
-        // lands closer than one label's width to the last one on the top row.
-        var lastTopX: CGFloat?
-        for index in items.indices {
-            items[index].x = min(max(items[index].x, inset), width - inset)
-            if let lastTopX, items[index].x - lastTopX < Self.captionGap {
-                items[index].row = 1
-            } else {
-                items[index].row = 0
-                lastTopX = items[index].x
+        return HStack(spacing: 4) {
+            ForEach(0..<total, id: \.self) { index in
+                let isToday = index >= filledBefore && index < filledNow
+                let isEdge = index == filledNow && isBreathing
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(index < filledBefore ? Color.primary.opacity(0.3)
+                          : (isToday || isEdge) ? color
+                          : Color.primary.opacity(0.07))
+                    // Every pip is the same size, always. Only colour and
+                    // opacity ever change.
+                    .frame(height: Self.pipHeight)
+                    .opacity(isEdge ? breath * 0.9 : isToday && isBreathing ? 0.55 + breath * 0.45 : 1)
             }
         }
-        return items
     }
 
-    private func captionView(_ caption: TimelineCaption) -> some View {
-        VStack(spacing: 0) {
-            Text(caption.label)
-                .font(.system(size: 8, weight: .semibold))
-                .tracking(0.8)
-                .foregroundStyle(.tertiary)
-            Text(TimeFormatting.shortClockTime(from: caption.date))
-                .font(.system(size: 10, weight: .medium))
-                .monospacedDigit()
-                .foregroundStyle(caption.color)
-        }
-        .fixedSize()
-        .position(x: caption.x, y: trackY + 26 + CGFloat(caption.row) * 30)
+    /// A two-second breath, 0…1, straight off the clock.
+    nonisolated static func breath(at date: Date) -> Double {
+        let phase = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2) / 2
+        return 0.5 - 0.5 * cos(phase * 2 * .pi)
     }
-
-    /// At most five labels, whatever the span — a fifteen-hour window would
-    /// otherwise print every hour on top of itself.
-    private var hourTicks: [Date] {
-        let (lower, upper) = bounds
-        let hours = upper.timeIntervalSince(lower) / 3600
-        let step = max(1, Int((hours / 4).rounded(.up)))
-        let calendar = Calendar.current
-
-        var ticks: [Date] = []
-        var cursor = calendar.date(bySetting: .minute, value: 0, of: lower) ?? lower
-        if cursor < lower { cursor = cursor.addingTimeInterval(3600) }
-        while cursor <= upper && ticks.count < 5 {
-            let f = fraction(cursor)
-            if f > 0.06 && f < 0.94 { ticks.append(cursor) }
-            cursor = cursor.addingTimeInterval(TimeInterval(step) * 3600)
-        }
-        return ticks
-    }
-
-    private func segment(from: Date, to: Date, width: CGFloat, color: Color) -> some View {
-        let x0 = fraction(from) * width
-        let x1 = fraction(to) * width
-        return Rectangle()
-            .fill(color)
-            .frame(width: max(2, x1 - x0), height: 2)
-            .offset(x: x0, y: trackY - 0.5)
-    }
-
-    private func dot(at date: Date, width: CGFloat, color: Color, filled: Bool) -> some View {
-        Circle()
-            .fill(filled ? color : Color(.secondarySystemGroupedBackground))
-            .overlay(Circle().strokeBorder(color, lineWidth: filled ? 0 : 1.5))
-            .frame(width: filled ? 11 : 10, height: filled ? 11 : 10)
-            .position(x: fraction(date) * width, y: trackY)
-    }
-
 }

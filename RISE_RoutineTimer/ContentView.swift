@@ -37,21 +37,11 @@ struct ContentView: View {
                 }
                 .tag(Tab.run)
 
-            HistoryView(steps: steps)
-                .tabItem {
-                    Label("History", systemImage: "chart.xyaxis.line")
-                }
-                .tag(Tab.history)
-
-            SettingsView(steps: steps)
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape")
-                }
-                .tag(Tab.settings)
         }
         .task {
             seedStarterRoutineIfNeeded()
             repairDuplicateStepIDs()
+            backfillWakeGoals()
             // Asking here means the prompt shows over the idle screen, never over a running timer.
             await RoutineNotificationManager.requestPermissionIfNeeded()
         }
@@ -87,6 +77,25 @@ struct ContentView: View {
         }
 
         saveChanges()
+    }
+
+    /// Mornings logged before the goal was stored on them get the goal that
+    /// is set now.
+    ///
+    /// It is a guess — the real goal on those days was not recorded — but it
+    /// is exactly the number those mornings were already being scored
+    /// against, so nothing changes today. What it buys is that the *next*
+    /// time the goal moves, those mornings keep the old one instead of
+    /// silently following along. See `MorningLog.goalMinutes`.
+    private func backfillWakeGoals() {
+        let logs = (try? modelContext.fetch(FetchDescriptor<MorningLog>())) ?? []
+        let goal = MorningSettings.stored().targetWakeMinutes
+        var changed = false
+        for log in logs where log.goalMinutes == nil {
+            log.goalMinutes = goal
+            changed = true
+        }
+        if changed { saveChanges() }
     }
 
     /// Steps created before `stepID` existed may share one migrated default.

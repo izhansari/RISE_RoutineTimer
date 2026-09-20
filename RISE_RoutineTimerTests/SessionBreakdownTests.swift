@@ -117,6 +117,57 @@ final class SessionBreakdownTests: XCTestCase {
         XCTAssertEqual(run.correcting(stepAt: 0, toSeconds: -5).steps[0].actualSeconds, 0, "clamped at zero")
     }
 
+    // MARK: - Skips
+
+    /// Saying how long a step took is saying it happened. A step skipped by
+    /// mistake used to stay out of its own stats however it was corrected.
+    func testGivingASkippedStepATimeUnskipsIt() {
+        let run = session([step(300, 4, skipped: true), step(60, 60)])
+        let fixed = run.correcting(stepAt: 0, toSeconds: 280)
+
+        XCTAssertFalse(fixed.steps[0].wasSkipped)
+        XCTAssertEqual(fixed.steps[0].outcome, .under)
+        XCTAssertTrue(fixed.steps[0].isTimed, "and it is evidence for its own average again")
+        XCTAssertEqual(fixed.activeSeconds, run.activeSeconds + 276)
+    }
+
+    func testASkippedStepCorrectedToNothingStaysSkipped() {
+        let run = session([step(300, 4, skipped: true)])
+        XCTAssertTrue(run.correcting(stepAt: 0, toSeconds: 0).steps[0].wasSkipped)
+    }
+
+    /// Coffee skipped after four seconds: the raw figure says 11:56 ahead,
+    /// and the steps that happened were twenty seconds over.
+    func testPacedDeltaIsWhatTheStepsThatHappenedDid() {
+        let run = session([step(300, 310), step(720, 4, skipped: true), step(60, 70)])
+
+        XCTAssertEqual(run.deltaSeconds, -696)
+        XCTAssertEqual(run.pacedDeltaSeconds, 20)
+    }
+
+    func testPartialTagsNameEachKindThatHappened() {
+        XCTAssertEqual(SessionBreakdown(steps: [step(60, 60), step(60, 50)]).partialTags, [])
+        XCTAssertEqual(SessionBreakdown(steps: [step(60, 2, skipped: true)]).partialTags, ["1 SKIPPED"])
+        XCTAssertEqual(
+            SessionBreakdown(steps: [step(60, 2, skipped: true), step(300, 9), step(300, 12)]).partialTags,
+            ["1 SKIPPED", "2 CUT SHORT"]
+        )
+    }
+
+    /// A run is comparable with the others while what was skipped or cut
+    /// short stays within a tenth of the plan.
+    func testAFullRunToleratesASmallSkipButNotALargeOne() {
+        XCTAssertTrue(session([step(600, 590), step(300, 310)]).isFullRun)
+        XCTAssertTrue(session([step(840, 800), step(60, 8)]).isFullRun, "a rushed minute of a fifteen-minute plan")
+        XCTAssertTrue(session([step(900, 880), step(100, 3, skipped: true)]).isFullRun, "exactly a tenth")
+        XCTAssertFalse(session([step(899, 880), step(101, 3, skipped: true)]).isFullRun, "just over it")
+        XCTAssertFalse(session([step(300, 300), step(720, 4, skipped: true)]).isFullRun, "coffee")
+
+        var endedEarly = session([step(300, 300)])
+        endedEarly.completed = false
+        XCTAssertFalse(endedEarly.isFullRun)
+    }
+
     // MARK: - Where the time went
 
     func testCompositionSharesAddUpAndStackInRunOrder() {
@@ -172,6 +223,18 @@ final class SessionBreakdownTests: XCTestCase {
         XCTAssertNil(tap(100, 100), "the hole holds the readout")
         XCTAssertNil(tap(130, 100), "still inside the hole")
         XCTAssertNil(tap(2, 2), "the corner of the square is outside the ring")
+    }
+
+    func testSteppingRoundTheRingWrapsAndPassesOverEmptySteps() {
+        let ring = RunComposition(steps: [step(60, 50), step(60, 0, skipped: true), step(60, 40), step(60, 30)])
+
+        XCTAssertEqual(ring.neighbour(of: 0, by: 1), 2, "the empty step is passed over")
+        XCTAssertEqual(ring.neighbour(of: 2, by: 1), 3)
+        XCTAssertEqual(ring.neighbour(of: 3, by: 1), 0, "wraps at twelve")
+        XCTAssertEqual(ring.neighbour(of: 0, by: -1), 3, "and backwards")
+        XCTAssertEqual(ring.neighbour(of: 2, by: -1), 0)
+        XCTAssertEqual(ring.neighbour(of: 1, by: 1), 0, "from a step with no slice, start at the first")
+        XCTAssertNil(RunComposition(steps: []).neighbour(of: 0, by: 1))
     }
 
     func testAnEmptyRunHasNoRing() {

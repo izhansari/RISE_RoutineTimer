@@ -221,7 +221,7 @@ struct SessionSummaryView: View {
             Spacer(minLength: 12)
             VStack(alignment: .trailing, spacing: 3) {
                 microLabel(breakdown.barelyHappenedCount > 0
-                           ? "\(breakdown.pacedStepCount) steps vs plan"
+                           ? "\(breakdown.pacedStepCount) \(breakdown.pacedStepCount == 1 ? "step" : "steps") vs plan"
                            : "Vs plan")
                 Text(Self.signed(breakdown.pacedDeltaSeconds))
                     .font(analogFont(22))
@@ -231,7 +231,7 @@ struct SessionSummaryView: View {
                     HStack(spacing: 5) {
                         HatchSwatch()
                             .frame(width: 9, height: 9)
-                        Text("\(breakdown.barelyHappenedCount) CUT SHORT")
+                        Text(breakdown.partialTags.joined(separator: " · "))
                             .font(.system(size: 9, weight: .semibold))
                             .tracking(1.2)
                             .foregroundStyle(.secondary)
@@ -442,11 +442,20 @@ struct SessionSummaryView: View {
 
     private var comparison: String? {
         let stats = RoutineStats(sessions: sessions.map(\.result))
-        guard stats.count >= 2, let average = stats.averageActiveSeconds, let best = stats.bestActiveSeconds else {
+        guard stats.count >= 2 else {
             return "First one in the books. Averages start next time."
         }
+        // Averages and bests are of full runs only, so there can be several
+        // runs and still nothing to compare with.
+        guard stats.fullRuns.count >= 2, let average = stats.averageActiveSeconds, let best = stats.bestActiveSeconds else {
+            return "Averages start after two full runs — ones without steps skipped or cut short."
+        }
         var parts = ["Average \(TimeFormatting.clockTime(from: average))"]
-        if result.activeSeconds <= best {
+        if !result.isFullRun {
+            // A quick morning because coffee was skipped is not a record.
+            parts.append("best \(TimeFormatting.clockTime(from: best))")
+            parts.append("this run not counted")
+        } else if result.activeSeconds <= best {
             parts.append("new best")
         } else {
             parts.append("best \(TimeFormatting.clockTime(from: best))")

@@ -39,8 +39,7 @@ struct HistoryView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Group {
+        Group {
                 if sessions.isEmpty && logs.isEmpty {
                     ContentUnavailableView(
                         "No Sessions Yet",
@@ -50,16 +49,20 @@ struct HistoryView: View {
                 } else {
                     List {
                         statsSection
-                        MorningChartsView(metrics: morningMetrics)
+                        MorningChartsView(metrics: morningMetrics) { startedAt in
+                            viewingSession = sessions.first { $0.startedAt == startedAt }?.result
+                        }
+                        insightsSection
                         suggestionsSection
                         sessionsSection
                     }
                 }
             }
-            .navigationTitle("History")
-            .sheet(item: $viewingSession) { result in
-                SessionSummaryView(result: result, context: .history)
-            }
+        .navigationTitle("History")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
+        .sheet(item: $viewingSession) { result in
+            SessionSummaryView(result: result, context: .history)
         }
     }
 
@@ -78,10 +81,16 @@ struct HistoryView: View {
             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
             .listRowBackground(Color.clear)
         } footer: {
-            if let trend = stats.recentTrendSeconds() {
-                Text(trendText(trend))
-            } else {
-                Text("\(stats.count) completed · trend appears after 10 sessions")
+            Text(statsFooter(stats))
+        }
+    }
+
+    /// Moved off the Today tab when that became a single screen. It belongs
+    /// beside the baselines it is drawn from anyway.
+    private var insightsSection: some View {
+        Section("Insights") {
+            ForEach(morningMetrics.insights(), id: \.self) { line in
+                Text(line).font(.subheadline)
             }
         }
     }
@@ -154,9 +163,22 @@ struct HistoryView: View {
     }
 
     private func trendText(_ trend: Int) -> String {
-        if abs(trend) < 15 { return "Last 5 sessions: about the same as before." }
+        if abs(trend) < 15 { return "Last 5 full runs: about the same as before." }
         let direction = trend < 0 ? "faster" : "slower"
-        return "Last 5 sessions: \(TimeFormatting.durationText(from: abs(trend))) \(direction) than the 5 before."
+        return "Last 5 full runs: \(TimeFormatting.durationText(from: abs(trend))) \(direction) than the 5 before."
+    }
+
+    /// The trend, and — when there are any — how many runs the numbers above
+    /// leave out, so a best time that ignores yesterday's quick morning is
+    /// explained rather than mysterious.
+    private func statsFooter(_ stats: RoutineStats) -> String {
+        var text = stats.recentTrendSeconds().map(trendText)
+            ?? "\(stats.count) completed · trend appears after 10 full runs"
+        if stats.partialCount > 0 {
+            let runs = stats.partialCount == 1 ? "1 run" : "\(stats.partialCount) runs"
+            text += " Average, best and trend leave out \(runs) with steps skipped or cut short."
+        }
+        return text
     }
 }
 
@@ -224,29 +246,41 @@ private struct SessionRow: View {
     }()
 
     var body: some View {
+        let breakdown = SessionBreakdown(steps: session.stepRecords)
+        // What makes this run not a full one, if anything. On a line of
+        // their own: beside the time range, three of them ran off the row.
+        let tags = (session.completed ? [] : ["ENDED EARLY"]) + breakdown.partialTags
+
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(Self.dayFormatter.string(from: session.startedAt))
                     .font(.subheadline)
-                HStack(spacing: 8) {
-                    Text(TimeFormatting.clockRange(from: session.startedAt, to: session.endedAt))
-                    if !session.completed {
-                        Text("ENDED EARLY")
-                            .font(.system(size: 10, weight: .semibold))
-                            .tracking(0.8)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.secondary.opacity(0.1), in: Capsule())
+                Text(TimeFormatting.clockRange(from: session.startedAt, to: session.endedAt))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if !tags.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(tags, id: \.self) { tag in
+                            Text(tag)
+                                .font(.system(size: 10, weight: .semibold))
+                                .tracking(0.8)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.secondary.opacity(0.1), in: Capsule())
+                        }
                     }
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 1)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
                 Text(TimeFormatting.clockTime(from: session.activeSeconds))
                     .font(analogFont(22))
-                Text(TimeFormatting.scheduleDeltaText(from: session.result.deltaSeconds))
+                // The steps that happened, against their plans — the same
+                // number the summary opens with. The raw figure called a
+                // skipped coffee "12:00 ahead".
+                Text(TimeFormatting.scheduleDeltaText(from: breakdown.pacedDeltaSeconds))
                     .font(.system(size: 10, weight: .semibold))
                     .tracking(1)
                     .foregroundStyle(.secondary)

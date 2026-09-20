@@ -217,6 +217,34 @@ final class MorningMetricsTests: XCTestCase {
         XCTAssertEqual(metrics([]).insights(now: now()).count, 1)
     }
 
+    // MARK: - Routine length is time spent doing it
+
+    /// The morning this was found on: started 2:13, ended 3:22, with a
+    /// 28-minute pause in the middle. 69 minutes on the clock, 41 of routine.
+    func testAPauseIsNotRoutineTime() {
+        var morning = record(0, start: (14, 13), end: (15, 22))
+        XCTAssertEqual(morning.durationMinutes, 69, "clock times alone: all there is to go on")
+
+        morning.routineActiveSeconds = 2449
+        XCTAssertEqual(morning.durationMinutes, 41, "the timer measured 40:49 of routine")
+        XCTAssertEqual(metrics([morning]).value(.duration, for: morning), 41)
+    }
+
+    /// With no pause, active time and the clock agree — which is every
+    /// morning the web app can describe, so the two apps still match.
+    func testWithoutAPauseActiveTimeAndTheClockAgree() {
+        var morning = record(0)
+        let byTheClock = morning.durationMinutes
+        morning.routineActiveSeconds = 25 * 60
+        XCTAssertEqual(morning.durationMinutes, byTheClock)
+    }
+
+    func testRoutineLengthStillNeedsBothEnds() {
+        var running = record(0, end: nil)
+        running.routineActiveSeconds = 600
+        XCTAssertNil(running.durationMinutes, "not a finished morning yet")
+    }
+
     // MARK: - A routine start implies a wake time
 
     func testStartingTheRoutineImpliesAWakeTimeWhenNoneIsLogged() {
@@ -253,20 +281,41 @@ final class MorningMetricsTests: XCTestCase {
         XCTAssertEqual(morning.activationMinutes, 0)
     }
 
-    // MARK: - Scrubbing the History charts
+    // MARK: - Today's finished figures
 
-    /// A bar spans its whole day, so a finger anywhere over it — left edge or
-    /// right — belongs to that morning, and a missed day's gap goes to
-    /// whichever neighbour is nearer.
-    func testAFingerOnAChartFindsTheMorningUnderIt() {
-        let points = [day(-5), day(-4), day(-1)].enumerated().map { MetricChart.Point(day: $1, value: $0) }
+    /// A morning that began five hours before the goal printed a
+    /// nine-character `−5:09:57` and ran into the next column.
+    func testAFinishedFigureIsMinutesAndStaysShort() {
+        XCTAssertEqual(TodayView.minuteText(42), "42 MIN")
+        XCTAssertEqual(TodayView.minuteText(0), "0 MIN")
+        XCTAssertEqual(TodayView.minuteText(59), "59 MIN")
+        XCTAssertEqual(TodayView.minuteText(60), "1:00")
+        XCTAssertEqual(TodayView.minuteText(80), "1:20")
 
-        XCTAssertEqual(MetricChart.nearest(to: at(-4, 0, 5), in: points)?.value, 1, "the left edge of a bar")
-        XCTAssertEqual(MetricChart.nearest(to: at(-4, 23, 50), in: points)?.value, 1, "and its right edge")
-        XCTAssertEqual(MetricChart.nearest(to: at(-3, 9, 0), in: points)?.value, 1, "early in the gap")
-        XCTAssertEqual(MetricChart.nearest(to: at(-2, 15, 0), in: points)?.value, 2, "late in it")
-        XCTAssertEqual(MetricChart.nearest(to: at(-9, 0, 0), in: points)?.value, 0, "off the left end")
-        XCTAssertEqual(MetricChart.nearest(to: at(3, 0, 0), in: points)?.value, 2, "off the right end")
-        XCTAssertNil(MetricChart.nearest(to: now(), in: []))
+        XCTAssertEqual(TodayView.minuteText(52, signed: true), "+52 MIN")
+        XCTAssertEqual(TodayView.minuteText(-310, signed: true), "−5:10", "up five hours early")
+        XCTAssertEqual(TodayView.minuteText(-20, signed: true), "−20 MIN")
+        XCTAssertEqual(TodayView.minuteText(0, signed: true), "0 MIN", "on the goal takes no sign")
+
+        for minutes in [-310, -20, 0, 42, 52, 80, 125] {
+            XCTAssertLessThanOrEqual(TodayView.minuteText(minutes, signed: true).count, 7)
+        }
+    }
+
+    /// Today's own share has to be separable from the rest of the week, so
+    /// the Today tab can draw the week already spent and then today growing
+    /// on the end of it.
+    func testABudgetCanLeaveTodayOut() {
+        // Sun 6th is the start of the week here; wakes at 6:45 are +15 each.
+        let m = metrics([record(0), record(-1), record(-2)])
+
+        XCTAssertEqual(m.weeklyBudgetUsed(.snooze, now: now()), 15, "only the 6th is in this week")
+        XCTAssertEqual(m.weeklyBudgetUsed(.snooze, now: now(), excluding: now()), 0, "…and that is today")
+
+        // A fuller week, today included and then held back.
+        let week = metrics([record(0), record(-1), record(-2), record(-3)])
+        let all = week.weeklyBudgetUsed(.activation, now: now())
+        let before = week.weeklyBudgetUsed(.activation, now: now(), excluding: now())
+        XCTAssertEqual(all - before, 10, "today's activation is 10 min")
     }
 }

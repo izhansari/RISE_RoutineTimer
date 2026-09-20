@@ -98,6 +98,18 @@ nonisolated struct SessionBreakdown: Equatable {
     let pacedDeltaSeconds: Int
     let barelyHappenedCount: Int
     let barelyHappenedDeltaSeconds: Int
+    let skippedCount: Int
+    let cutShortCount: Int
+
+    /// "1 SKIPPED", "2 CUT SHORT" — one tag per kind that occurred, for the
+    /// summary's chip and History's rows. Empty for a run where every step
+    /// happened.
+    var partialTags: [String] {
+        var tags: [String] = []
+        if skippedCount > 0 { tags.append("\(skippedCount) SKIPPED") }
+        if cutShortCount > 0 { tags.append("\(cutShortCount) CUT SHORT") }
+        return tags
+    }
 
     init(steps: [StepResult]) {
         var rows: [Row] = []
@@ -128,6 +140,8 @@ nonisolated struct SessionBreakdown: Equatable {
         pacedDeltaSeconds = paced.reduce(0) { $0 + $1.deltaSeconds }
         barelyHappenedCount = barely.count
         barelyHappenedDeltaSeconds = barely.reduce(0) { $0 + $1.deltaSeconds }
+        skippedCount = barely.filter { $0.outcome == .skipped }.count
+        cutShortCount = barely.count - skippedCount
     }
 }
 
@@ -193,10 +207,8 @@ nonisolated struct RunComposition: Equatable {
     /// Nil in the hole and outside the ring: the hole holds the readout, and
     /// a tap there is not a tap on a step.
     ///
-    /// Done by hand because Swift Charts' own selection waits for a short
-    /// press when the chart is inside a scroll view — that is how it tells a
-    /// touch from a scroll — so a plain tap, the obvious thing to do to a
-    /// slice, did nothing at all.
+    /// Done by hand: the ring is drawn with plain shapes (see `RunRingView`
+    /// for why it is not a chart), and a tap is the only gesture it takes.
     func index(at point: CGPoint, inRingOf size: CGSize, innerRatio: Double) -> Int? {
         let radius = Double(min(size.width, size.height)) / 2
         guard radius > 0, totalSeconds > 0 else { return nil }
@@ -211,6 +223,19 @@ nonisolated struct RunComposition: Equatable {
         return index(atSeconds: turn * Double(totalSeconds))
     }
 
+    /// The next slice round the ring from `index` (`offset` +1) or the one
+    /// before it (−1), wrapping at twelve and passing over steps that took no
+    /// time. This is how the slivers are reached: four shower steps of forty
+    /// seconds each are a few degrees apiece, and nobody should have to tap
+    /// a three-point target.
+    func neighbour(of index: Int, by offset: Int) -> Int? {
+        let drawn = slices.filter { $0.result.actualSeconds > 0 }.map(\.index)
+        guard !drawn.isEmpty else { return nil }
+        guard let position = drawn.firstIndex(of: index) else { return drawn.first }
+        let count = drawn.count
+        return drawn[((position + offset) % count + count) % count]
+    }
+
     /// The step that took the most time — where the ring opens. The earlier
     /// one on a tie.
     var largestIndex: Int? {
@@ -219,6 +244,40 @@ nonisolated struct RunComposition: Equatable {
             best = slice
         }
         return best?.index
+    }
+}
+
+// MARK: - Whole-run numbers that survive a skip
+
+extension SessionResult {
+    /// How far the steps that *happened* ran over or under their plans.
+    ///
+    /// `deltaSeconds` — active time minus the whole plan — calls a skipped
+    /// twelve-minute coffee "12:00 ahead", and calls a run ended early ahead
+    /// by every step it never reached. The summary's header never used it
+    /// for that reason; History's rows and the Run tab's "Complete" line did,
+    /// so the same run read 12:00 ahead in the list and 0:20 when opened.
+    nonisolated var pacedDeltaSeconds: Int { SessionBreakdown(steps: steps).pacedDeltaSeconds }
+
+    /// How much of the plan may have been skipped or cut short before the
+    /// run stops being comparable with the others.
+    nonisolated static let fullRunTolerance = 0.10
+
+    /// A finished run in which, near enough, every step happened — the only
+    /// kind that can set a best time or belong in an average.
+    ///
+    /// Skipping coffee makes a run twelve minutes "faster" than any real
+    /// one. The test is a share of the plan, not "no skips at all", on
+    /// purpose: someone who always ticks off a one-minute step in ten
+    /// seconds would otherwise never have a full run, and their average
+    /// would simply vanish. Under the tolerance the distortion is bounded at
+    /// a tenth; over it the run is left out.
+    nonisolated var isFullRun: Bool {
+        guard completed else { return false }
+        let missed = steps.filter { $0.outcome.barelyHappened }.reduce(0) { $0 + $1.plannedSeconds }
+        guard missed > 0 else { return true }
+        guard plannedSeconds > 0 else { return false }
+        return Double(missed) / Double(plannedSeconds) <= Self.fullRunTolerance
     }
 }
 
@@ -232,7 +291,11 @@ extension SessionResult {
     /// changes by the difference, and so does its end, so the start–end range,
     /// the Today tab's routine end and every average read the corrected run.
     /// The start never moves — it was recorded correctly. A step fixed by hand
-    /// is no longer "auto-advanced", since its time is no longer the plan's.
+    /// is no longer "auto-advanced", since its time is no longer the plan's —
+    /// and no longer *skipped* either, if it is given any time at all: saying
+    /// how long a step took is saying it happened. Without that, a step
+    /// skipped by mistake stayed out of its own stats however it was fixed.
+    /// Corrected to zero it stays skipped, which is what zero means.
     nonisolated func correcting(stepAt index: Int, toSeconds seconds: Int) -> SessionResult {
         guard steps.indices.contains(index) else { return self }
         let newSeconds = max(0, seconds)
@@ -242,6 +305,9 @@ extension SessionResult {
         var corrected = self
         corrected.steps[index].actualSeconds = newSeconds
         corrected.steps[index].autoAdvanced = false
+        if newSeconds > 0, corrected.steps[index].wasSkipped {
+            corrected.steps[index].skipped = false
+        }
         corrected.activeSeconds = max(0, activeSeconds + delta)
         corrected.endedAt = max(startedAt, endedAt.addingTimeInterval(TimeInterval(delta)))
         return corrected

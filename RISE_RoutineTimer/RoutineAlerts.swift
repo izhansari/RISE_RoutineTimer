@@ -18,8 +18,12 @@ final class RoutineAlerts {
     private let successHaptic = UINotificationFeedbackGenerator()
     private let impactHaptic = UIImpactFeedbackGenerator(style: .light)
 
-    func stepStarted(_ step: RunStep, isLast: Bool, sounds: Bool, voice: Bool) {
-        successHaptic.notificationOccurred(.success)
+    /// - Parameter auto: the engine advanced by itself. Only then does the
+    ///   phone buzz: a step you ticked off has already answered your finger
+    ///   (`RoutineHaptics`), and a second, generic buzz on top of that one
+    ///   turned a click into a rattle.
+    func stepStarted(_ step: RunStep, isLast: Bool, auto: Bool, sounds: Bool, voice: Bool) {
+        if auto { successHaptic.notificationOccurred(.success) }
         if sounds { play("chime_step") }
         if voice {
             var line = "\(step.title). \(TimeFormatting.spokenDuration(from: step.durationSeconds))."
@@ -36,8 +40,11 @@ final class RoutineAlerts {
         settleAudioSession()
     }
 
-    func completed(_ result: SessionResult, sounds: Bool, voice: Bool) {
-        successHaptic.notificationOccurred(.success)
+    /// - Parameter byHand: the last step was ticked off, so the check mark has
+    ///   already played the routine's flourish; an auto-advanced finish gets
+    ///   the system success buzz instead.
+    func completed(_ result: SessionResult, byHand: Bool, sounds: Bool, voice: Bool) {
+        if !byHand { successHaptic.notificationOccurred(.success) }
         if sounds { play("chime_done") }
         if voice {
             speak("Routine complete in \(TimeFormatting.spokenDuration(from: result.activeSeconds)).", delay: sounds ? 0.9 : 0)

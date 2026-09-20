@@ -2,59 +2,29 @@
 //  MorningChartsView.swift
 //  RISE_RoutineTimer
 //
-//  The charting half of the History tab, matching MorningCheckin's
-//  HistoryScreen: a rolling-baseline table, thirty days of snooze and
-//  activation as bars, routine duration as a line, and the missed-day
-//  counters. Each chart carries a dashed average rule, which is the thing
-//  that actually answers "better or worse than usual".
+//  The accountability half of the History tab: the mornings chart, the
+//  rolling-baseline table and the missed-day counters.
 //
-//  Swift Charts rather than a hand-rolled plot: it gets the axes, scaling and
-//  accessibility for free.
+//  The chart is `MorningColumnsSection` — fourteen upright morning marks on
+//  one clock (see `MorningColumns.swift`). It replaced three separate 30-day
+//  charts, one per metric. Those could each say whether a number was going
+//  up, and between them could not say what goes with what, because the three
+//  never shared a day: "on the mornings I'm up earlier, do I start sooner?"
+//  had no answer anywhere in the app.
 //
 
-import Charts
 import SwiftUI
-import UIKit
 
 struct MorningChartsView: View {
     let metrics: MorningMetrics
     var now: Date = Date()
-
-    /// Newest-last, which is the order a time axis wants.
-    private var window: [MorningRecord] {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: now) ?? now
-        return metrics.records
-            .filter { $0.day >= cutoff && $0.wakeAt != nil }
-            .sorted { $0.day < $1.day }
-    }
-
-    private func series(_ metric: MorningMetrics.Metric) -> [(day: Date, value: Int)] {
-        window.compactMap { record in
-            metrics.value(metric, for: record).map { (record.day, $0) }
-        }
-    }
+    /// Opens the run that began at this moment (a session's identity).
+    var onOpenRun: (Date) -> Void = { _ in }
 
     var body: some View {
         Group {
+            MorningColumnsSection(metrics: metrics, now: now, onOpenRun: onOpenRun)
             baselinesSection
-            chartSection(
-                title: "Snooze — 30 days",
-                metric: .snooze,
-                unit: "min past target",
-                style: .bars
-            )
-            chartSection(
-                title: "Activation — 30 days",
-                metric: .activation,
-                unit: "min to start",
-                style: .bars
-            )
-            chartSection(
-                title: "Routine length — 30 days",
-                metric: .duration,
-                unit: "min",
-                style: .line
-            )
             missedSection
         }
     }
@@ -119,26 +89,6 @@ struct MorningChartsView: View {
         minutes > 0 ? "+\(minutes) min" : "\(minutes) min"
     }
 
-    // MARK: - Charts
-
-    private func chartSection(
-        title: String,
-        metric: MorningMetrics.Metric,
-        unit: String,
-        style: MetricChart.Style
-    ) -> some View {
-        let points = series(metric).map { MetricChart.Point(day: $0.day, value: $0.value) }
-        return Section {
-            MetricChart(points: points, metric: metric, unit: unit, style: style)
-        } header: {
-            Text(title)
-        } footer: {
-            if metric == .snooze, points.count >= 2 {
-                Text("Darker bars are mornings you were up on time.")
-            }
-        }
-    }
-
     // MARK: - Missed days
 
     private var missedSection: some View {
@@ -172,174 +122,179 @@ struct MorningChartsView: View {
     }
 }
 
-// MARK: - One scrubbable chart
+// MARK: - The mornings chart
 
-/// Thirty days of one metric. Drag a finger across it and the line above the
-/// plot reports the morning under it; lift, and it goes back to the average.
-///
-/// The readout is a fixed line *above* the plot rather than a callout riding
-/// the finger: a callout is under your thumb exactly when you want to read
-/// it, and one that flips sides near the edges makes the numbers jump. Its
-/// values cut rather than roll, like every other number in the app, and
-/// crossing onto a new day ticks the way the schedule tape does.
-struct MetricChart: View {
-    nonisolated struct Point: Equatable {
-        let day: Date
-        let value: Int
+/// Fourteen mornings at a time, newest on the right. Tap a column or slide
+/// across them and the box above reports that morning; with nothing selected
+/// it reports the page's averages. ‹ › page back through older fortnights —
+/// past about three weeks the columns are too thin to read, so the chart
+/// pages rather than squeezes.
+struct MorningColumnsSection: View {
+    let metrics: MorningMetrics
+    var now: Date = Date()
+    let onOpenRun: (Date) -> Void
+
+    @AppStorage(FillTheme.storageKey) private var fillThemeRaw = FillTheme.default.rawValue
+    /// 0 is the fortnight ending today; 1 the one before it.
+    @State private var page = 0
+    @State private var selected: Int?
+
+    static let daysPerPage = 14
+
+    private var tint: Color { (FillTheme(rawValue: fillThemeRaw) ?? .default).color }
+
+    private var lastDay: Date {
+        metrics.calendar.date(byAdding: .day, value: -page * Self.daysPerPage, to: now) ?? now
     }
 
-    enum Style { case bars, line }
-
-    let points: [Point]
-    let metric: MorningMetrics.Metric
-    let unit: String
-    let style: Style
-
-    /// Where the finger is on the time axis. Swift Charts clears it when the
-    /// touch ends.
-    @State private var touch: Date?
-
-    private var average: Double {
-        Double(points.reduce(0) { $0 + $1.value }) / Double(max(1, points.count))
+    private var columns: [MorningColumn] {
+        MorningColumn.window(
+            records: metrics.records, endingOn: lastDay, days: Self.daysPerPage,
+            currentGoal: metrics.settings.targetWakeMinutes, calendar: metrics.calendar
+        )
     }
 
-    private var selected: Point? {
-        touch.flatMap { Self.nearest(to: $0, in: points) }
-    }
-
-    /// The logged morning closest to a moment on the axis. Missed days leave
-    /// gaps, so the finger is rarely exactly on one; a tie goes to the
-    /// earlier day.
-    nonisolated static func nearest(to date: Date, in points: [Point]) -> Point? {
-        points.min { a, b in
-            // A bar is drawn across its whole day, so measure to the middle
-            // of it — measuring to midnight hands the right-hand half of
-            // every bar to the next morning.
-            let da = abs(date.timeIntervalSince(a.day.addingTimeInterval(12 * 3600)))
-            let db = abs(date.timeIntervalSince(b.day.addingTimeInterval(12 * 3600)))
-            return da == db ? a.day < b.day : da < db
-        }
+    /// There is an older page while anything was logged before this one.
+    private var hasOlder: Bool {
+        guard let first = columns.first?.day else { return false }
+        return metrics.records.contains { $0.hasAnything && $0.day < first }
     }
 
     var body: some View {
-        if points.count < 2 {
-            Text("Not enough data yet.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.vertical, 20)
-        } else {
-            VStack(alignment: .leading, spacing: 8) {
-                readout
-                chart
-                    .frame(height: 150)
+        let columns = columns
+        let goal = metrics.settings.targetWakeMinutes
+        let scale = ClockScale(columns: columns, goal: goal)
+
+        Section {
+            VStack(alignment: .leading, spacing: 14) {
+                readout(columns)
+                MorningColumnsChart(
+                    columns: columns, scale: scale, tint: tint,
+                    selection: $selected,
+                    label: { Self.dayNumber.string(from: $0.day) }
+                )
+                MorningColumnsLegend(tint: tint)
             }
-            .padding(.vertical, 6)
-            .onChange(of: selected) { old, new in
-                guard let new, old != nil, old != new else { return }
-                UISelectionFeedbackGenerator().selectionChanged()
+            .padding(.vertical, 8)
+        } header: {
+            HStack {
+                Text("Mornings")
+                Spacer()
+                pager(columns)
             }
+        } footer: {
+            Text("The clock runs down the page, so earlier is higher. A cap is when you woke, the thin line is how long until you started, the box is the routine. An empty column is a missed day.")
         }
     }
 
     // MARK: Readout
 
-    private var readout: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(selected.map { Self.dayFormatter.string(from: $0.day).uppercased() } ?? "30-DAY AVERAGE")
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(1.6)
-                .foregroundStyle(selected == nil ? .secondary : .primary)
-            Spacer()
-            Text(valueText(selected?.value ?? Int(average.rounded())))
-                .font(analogFont(17))
-                .monospacedDigit()
-                .foregroundStyle(selected == nil ? .secondary : .primary)
+    private func readout(_ columns: [MorningColumn]) -> some View {
+        let column = selected.flatMap { columns.indices.contains($0) ? columns[$0] : nil }
+        let averages = MorningColumnAverages(columns)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(title(column, averages))
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(1.6)
+                Spacer()
+                if let start = column?.sessionStart {
+                    Button { onOpenRun(start) } label: {
+                        Text("OPEN RUN ›")
+                            .font(.system(size: 10, weight: .semibold))
+                            .tracking(1.4)
+                            .foregroundStyle(.primary)
+                            .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            HStack(alignment: .top, spacing: 18) {
+                stat("Woke", (column == nil ? averages.wake : column?.wake).map(MorningColumnsChart.clockText) ?? "—")
+                stat("To start", (column == nil ? averages.lag : column?.lag).map(Self.span) ?? "—")
+                stat("Routine", (column == nil ? averages.routine : column?.routineMinutes).map { "\($0) MIN" } ?? "—", color: tint)
+            }
         }
+        .padding(14)
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(column == nil ? 0.14 : 1), lineWidth: column == nil ? 1 : 1.5))
         .contentTransition(.identity)
         .transaction { $0.animation = nil }
-        .accessibilityElement(children: .combine)
     }
 
-    private func valueText(_ minutes: Int) -> String {
-        guard metric == .snooze else { return "\(minutes) MIN" }
-        if minutes == 0 { return "ON TIME" }
-        return minutes > 0 ? "+\(minutes) MIN" : "\(abs(minutes)) MIN EARLY"
-    }
-
-    // MARK: Plot
-
-    private var chart: some View {
-        Chart {
-            ForEach(points, id: \.day) { point in
-                if style == .bars {
-                    BarMark(
-                        x: .value("Day", point.day, unit: .day),
-                        y: .value(unit, point.value)
-                    )
-                    .foregroundStyle(barColor(point.value))
-                    .opacity(selected == nil || selected == point ? 1 : 0.35)
-                    .cornerRadius(2)
-                } else {
-                    LineMark(
-                        x: .value("Day", point.day, unit: .day),
-                        y: .value(unit, point.value)
-                    )
-                    .foregroundStyle(Color.primary)
-                    .interpolationMethod(.monotone)
-                    PointMark(
-                        x: .value("Day", point.day, unit: .day),
-                        y: .value(unit, point.value)
-                    )
-                    .foregroundStyle(Color.primary)
-                    .symbolSize(selected == point ? 70 : 18)
-                }
-            }
-
-            RuleMark(y: .value("Average", average))
-                .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                // An explicit Color, not `.secondary`: a hierarchical
-                // style on a mark falls back to the chart's accent.
-                .foregroundStyle(Color.gray.opacity(0.7))
-                .annotation(position: .top, alignment: .trailing) {
-                    Text("avg \(Int(average.rounded()))")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.secondary)
-                }
-
-            if let selected {
-                RuleMark(x: .value("Day", selected.day, unit: .day))
-                    .lineStyle(StrokeStyle(lineWidth: 1))
-                    .foregroundStyle(Color.primary.opacity(0.35))
-                    .zIndex(-1)
-            }
+    private func title(_ column: MorningColumn?, _ averages: MorningColumnAverages) -> String {
+        if let column {
+            let day = Self.longDay.string(from: column.day).uppercased()
+            return column.hasAnything ? day : "\(day) · NOTHING LOGGED"
         }
-        .chartXSelection(value: $touch)
-        .chartXAxis {
-            AxisMarks(values: .stride(by: .day, count: 7)) { _ in
-                AxisGridLine()
-                AxisValueLabel(format: .dateTime.month(.defaultDigits).day())
-            }
-        }
-        .chartYAxis {
-            AxisMarks(position: .leading) { _ in
-                AxisGridLine()
-                AxisValueLabel()
-            }
-        }
-        .transaction { $0.animation = nil }
+        return averages.count == 0 ? "NOTHING LOGGED THESE TWO WEEKS" : "AVERAGE OF \(averages.count) MORNING\(averages.count == 1 ? "" : "S")"
     }
 
-    /// Snooze is the one chart where the value has a good/bad reading, so it
-    /// is the only one that gets a colour ramp.
-    private func barColor(_ value: Int) -> Color {
-        guard metric == .snooze else { return Color.secondary }
-        if value <= 0 { return Color.primary }
-        if value <= 15 { return Color.secondary }
-        return Color.secondary.opacity(0.4)
+    private func stat(_ label: String, _ value: String, color: Color = .primary) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label.uppercased())
+                .font(.system(size: 9, weight: .semibold))
+                .tracking(1.6)
+                .foregroundStyle(.tertiary)
+            Text(value)
+                .font(analogFont(21))
+                .monospacedDigit()
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
     }
 
-    private static let dayFormatter: DateFormatter = {
+    // MARK: Paging
+
+    private func pager(_ columns: [MorningColumn]) -> some View {
+        HStack(spacing: 2) {
+            pageButton("chevron.left", label: "Earlier two weeks", enabled: hasOlder) { page += 1 }
+            if let first = columns.first?.day, let last = columns.last?.day {
+                Text("\(Self.shortDay.string(from: first)) – \(Self.shortDay.string(from: last))")
+                    .font(.system(size: 11, weight: .medium))
+                    .monospacedDigit()
+                    .textCase(nil)
+            }
+            pageButton("chevron.right", label: "Later two weeks", enabled: page > 0) { page -= 1 }
+        }
+    }
+
+    private func pageButton(_ systemName: String, label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            selected = nil
+            action()
+        } label: {
+            Image(systemName: systemName)
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 32, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(enabled ? Color.primary : Color.secondary.opacity(0.35))
+        .disabled(!enabled)
+        .accessibilityLabel(label)
+    }
+
+    // MARK: Formatting
+
+    nonisolated private static func span(_ minutes: Int) -> String {
+        minutes >= 60 ? "\(minutes / 60):" + String(format: "%02d", minutes % 60) : "\(minutes) MIN"
+    }
+
+    private static let dayNumber: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "d"
+        return f
+    }()
+
+    private static let shortDay: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        return f
+    }()
+
+    private static let longDay: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "EEE, MMM d"
         return f

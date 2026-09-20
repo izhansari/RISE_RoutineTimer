@@ -449,6 +449,100 @@ A read-through of the whole codebase before the next round of tweaks; these are 
   rule on the selected morning, a tick on each new day.
 - 121 → 127 tests.
 
+### Run 25 — What a skip does to the run (2026-09-19)
+
+Skipping was already right for the *step* (never a sample for its own average or a suggestion) and wrong for the *run*.
+
+- **Ahead / behind:** History's rows and the Run tab's `Complete` line used active time minus the whole plan, so a
+  skipped coffee read "12:00 ahead" in the list and 0:20 in the summary. All three now show
+  `SessionResult.pacedDeltaSeconds`; rows carry `1 SKIPPED` / `2 CUT SHORT` tags.
+- **Best / average / trend** come from `RoutineStats.fullRuns` — completed runs where what was skipped or cut short
+  is at most a tenth of the plan (`isFullRun`). A 1:24 run of ticked-off steps no longer becomes BEST; verified live
+  (`AVERAGE 26:38 · BEST 21:00 · THIS RUN NOT COUNTED`). History's footer says how many runs are left out.
+- **Correcting a skipped step's time un-skips it** (`correcting` clears `skipped` for any time above zero), with a
+  line in the edit bar saying so before Save.
+- The Run tab's finished header reads the saved session, so a correction shows there; "1 step vs plan" grammar.
+- Left alone on purpose: the live pace during a run, the streak, and the Today tab's wall-clock duration.
+- 127 → 134 tests.
+
+### Run 26 — The chart said 69 minutes, the session said 40:49 (2026-09-19)
+
+- Found on the owner's phone: Sep 9 ran 2:13–3:22 pm with a 28:18 pause. `MorningRecord.durationMinutes` was end
+  minus start (a literal port of the web app, which has no pauses), so the routine-length chart, the rolling
+  baselines and the Today tile counted the pause; the session list, AVERAGE and BEST use active time.
+- `durationMinutes` now prefers the session's measured active time (`routineActiveSeconds`, set in `join`) and falls
+  back to the clock. Checked against the phone's real data: three days change (Sep 9 69→41, Sep 13 24→21,
+  Sep 17 21→17), each now equal to its session row; the other ten are identical.
+- 134 → 138 tests.
+
+### Run 27 — The ring's double transition; a check mark you can feel (2026-09-19)
+
+- **The ring glitch was Swift Charts.** Recorded the simulator and split the frames: on selection the new slice
+  vanished, faded back in pale, the old one stayed solid, and the colours swapped in one frame at the end — two
+  transitions. `RunRingView` is now plain SwiftUI shapes (`RingSlice`, animatable outer radius, animated fill,
+  `easeOut` 0.22 s); the re-recording shows one clean crossfade.
+- A press-and-drag gesture was tried on the new ring and removed: it blocked scrolling from swipes that start on the
+  ring. Taps only, plus ‹ › steppers beside the step's name for the slivers (`RunComposition.neighbour`).
+- **`RoutineHaptics`:** tick on touch-down with the chip pressing in, a Core Haptics click-then-thud on release, a
+  rising flourish on finishing the routine. The system success buzz is kept for auto-advanced steps only.
+- 138 → 142 tests.
+
+### Run 28 — One mark, both tabs (2026-09-20)
+
+Two rounds of mockups first (a canvas, then `DesignLab.swift` on the phone — the owner picked the D variants).
+
+- **`MorningColumn` / `MorningColumnsView`:** one morning as an upright mark — dotted snooze, wake cap, whisker to the
+  start, box for the routine, dashed tail for a pause — on a clock that runs down the page.
+- **History:** the three 30-day charts are gone. One chart of fourteen columns, paged with ‹ ›, tap or slide to select,
+  readout with `OPEN RUN ›`. It answers "what goes with what?", which three separate charts structurally could not.
+- **Today:** the coloured-dot timeline and the three tiles are gone. The week with today's column growing at the end,
+  one big number for the current phase, and at completion the three stats against last morning / 7-day / 30-day.
+- **Two bugs found by looking at it on a device, not by tests:** one stray afternoon run stretched a fortnight's clock
+  into slivers (`ClockScale` now ignores strays); and the finished stats collided (`−5:09:5700:15`) because they were
+  seconds-precise — now minute resolution.
+- The sideways slide is a UIKit pan that only begins on horizontal movement; a SwiftUI `DragGesture` froze the page's
+  scrolling twice.
+- 142 → 157 tests.
+
+### Run 29 — Today on one screen (2026-09-20)
+
+Mocked up as variant E in `DesignLab.swift` first, then built.
+
+- **One screen, nothing scrolls, the button pinned.** The week at the top, everything live gathered at the bottom.
+- **History is no longer a tab** — three tabs now, and History is pushed from `ALL MORNINGS ›` on the week chart.
+  The insight card moved to History, beside the baselines it is drawn from.
+- **Both budgets always visible; the live one breathes.** Found and fixed three faults in the first version: pips
+  changed height (the "moving up and down"), the `repeatForever` fought the per-second `TimelineView`, and it pulsed
+  before anything was being spent. Now: uniform geometry, a clock-driven breath, and nothing moves until it should.
+- **Today's chart selects and annotates in place** — labels float beside the selected column's own marks, so picking
+  a day moves nothing. Only the button navigates.
+- 157 → 158 tests.
+
+### Run 30 — The goal is history, not a setting (2026-09-20)
+
+The owner's reason, which settles it: *"the goal is to move the wake up time earlier. that's honestly the whole goal
+of this app and why i made it."* Measuring snooze against the *current* goal meant every move erased the evidence of
+the last one.
+
+- `MorningLog.goalMinutes` records the goal each morning was held to; `MorningRecord.snoozeMinutes` prefers it and
+  falls back to the current goal only for rows written before this. Budgets, baselines and insights follow for free.
+- `ContentView.backfillWakeGoals()` stamps existing rows once with the current goal — a guess, but the same number
+  they were already being scored against, so nothing changes today and nothing drifts tomorrow.
+- **The goal line steps.** Each column carries its own goal; `goalPath` draws flats with risers where it changed.
+- **A missed day carries the goal across the gap.** Caught by looking at the real chart: an unlogged Tuesday showed
+  today's goal and spiked the line. `window` now fills forward, and backwards before the first logged morning.
+- 158 → 164 tests.
+
+### Run 31 — Room for the chart (2026-09-20)
+
+All three from looking at it on the phone.
+
+- **Annotation labels were being dropped.** Their height thresholds meant a short whisker or box got no label, so
+  dragging across the week showed one, two or three numbers depending on the day. They are now always drawn and
+  nudged apart (`placedLabels`).
+- **The chart fills the vertical space** it was wasting on a `Spacer`.
+- **Settings moves off the tab bar** to a gear in Today's header; two tabs left, Today and Run.
+
 ### Later (next)
 17. iCloud sync via SwiftData + CloudKit (decide **before** run 2: CloudKit requires all properties to have defaults and all relationships optional, which constrains the `RoutineSession` design).
 18. Multiple routines / profiles if "our routine" means more than one person.

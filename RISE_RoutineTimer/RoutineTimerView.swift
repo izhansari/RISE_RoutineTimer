@@ -422,9 +422,18 @@ struct RoutineTimerView: View {
         editingStep = StepEditRequest(step: step, isNew: true)
     }
 
+    /// The run just finished, as History has it. The engine keeps its own
+    /// copy until Start Over, but the saved session is the one that EDIT
+    /// corrects — read from the engine, this header went on saying 1:24 about
+    /// a run that had just been corrected to 5:24 in the sheet above it.
+    private var finishedResult: SessionResult? {
+        guard engine.isComplete, let start = engine.routineStartDate else { return nil }
+        return sessions.first { $0.startedAt == start }?.result
+    }
+
     private var idleHeadlineTime: String {
         if engine.isComplete {
-            return TimeFormatting.clockTime(from: engine.activeElapsedSeconds)
+            return TimeFormatting.clockTime(from: finishedResult?.activeSeconds ?? engine.activeElapsedSeconds)
         }
         let planned = engine.run == nil
             ? steps.reduce(0) { $0 + $1.durationSeconds }
@@ -436,7 +445,11 @@ struct RoutineTimerView: View {
         guard let start = engine.routineStartDate else { return nil }
         let started = "Started \(TimeFormatting.shortClockTime(from: start))"
         if engine.isComplete {
-            let delta = TimeFormatting.scheduleDeltaText(from: engine.scheduleDeltaSeconds)
+            // Against the plans of the steps that happened, as the summary
+            // and History say it — not the engine's running figure, which
+            // counts a skipped step as time gained.
+            let paced = SessionBreakdown(steps: finishedResult?.steps ?? engine.results).pacedDeltaSeconds
+            let delta = TimeFormatting.scheduleDeltaText(from: paced)
             return "Complete · \(started.lowercased()) · \(delta.lowercased())"
         }
         if engine.isPaused {
@@ -483,7 +496,7 @@ struct RoutineTimerView: View {
     /// the context line under the planned time, wrapping onto a second line.
     private var streakBadge: some View {
         Button {
-            navigation.selectedTab = .history
+            navigation.openHistory()
         } label: {
             HStack(alignment: .center, spacing: 6) {
                 Text("\(streak)")

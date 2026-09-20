@@ -65,10 +65,10 @@ final class RoutineAlertCoordinator {
         case .paused, .reset:
             RoutineNotificationManager.cancelRunAlerts()
             alerts.stopSpeaking()
-        case .stepStarted(let index, _):
+        case .stepStarted(let index, let auto):
             if engine.steps.indices.contains(index) {
                 let isLast = index == engine.steps.count - 1
-                alerts.stepStarted(engine.steps[index], isLast: isLast, sounds: soundsEnabled, voice: voiceEnabled)
+                alerts.stepStarted(engine.steps[index], isLast: isLast, auto: auto, sounds: soundsEnabled, voice: voiceEnabled)
             }
             syncNotifications()
         case .overtimeStarted(let index):
@@ -77,7 +77,8 @@ final class RoutineAlertCoordinator {
             }
         case .completed(let result):
             RoutineNotificationManager.cancelRunAlerts()
-            alerts.completed(result, sounds: soundsEnabled, voice: voiceEnabled)
+            let byHand = result.steps.last?.autoAdvanced == false
+            alerts.completed(result, byHand: byHand, sounds: soundsEnabled, voice: voiceEnabled)
             recordSession(result)
         case .abandoned(let result):
             RoutineNotificationManager.cancelRunAlerts()

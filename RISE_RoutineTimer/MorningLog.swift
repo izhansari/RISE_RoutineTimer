@@ -22,10 +22,24 @@ final class MorningLog {
     /// Start of the local day this belongs to — the row's identity.
     var day: Date = Date()
     var wakeAt: Date?
+    /// The wake goal in force on this morning, minutes after midnight.
+    ///
+    /// Snooze used to be measured against whatever the goal was *now*, so
+    /// moving the goal rewrote every morning behind it: nudge it half an
+    /// hour later and the whole record gained half an hour of virtue. That
+    /// is fatal for this app in particular, whose entire purpose is to walk
+    /// the wake time earlier — without this, each move erased the evidence
+    /// of the last one.
+    ///
+    /// Optional because rows written before it existed have none; they are
+    /// backfilled once at launch (`ContentView.backfillWakeGoals`) and fall
+    /// back to the current goal until then.
+    var goalMinutes: Int?
 
-    init(day: Date, wakeAt: Date? = nil) {
+    init(day: Date, wakeAt: Date? = nil, goalMinutes: Int? = nil) {
         self.day = day
         self.wakeAt = wakeAt
+        self.goalMinutes = goalMinutes
     }
 }
 
@@ -48,6 +62,7 @@ extension MorningRecord {
             let day = calendar.startOfDay(for: log.day)
             var record = byDay[day] ?? MorningRecord(day: day)
             record.wakeAt = log.wakeAt
+            record.goalMinutes = log.goalMinutes
             byDay[day] = record
         }
 
@@ -59,6 +74,7 @@ extension MorningRecord {
             }
             record.routineStartAt = session.startedAt
             record.routineEndAt = session.endedAt
+            record.routineActiveSeconds = session.activeSeconds
             record.completedRoutine = session.completed
             byDay[day] = record
         }
@@ -87,12 +103,16 @@ final class MorningLogStore {
 
     /// Records the moment of waking. Writing it twice on one day overwrites,
     /// so a mis-tap can be corrected by tapping again.
-    func recordWake(at date: Date, existing logs: [MorningLog]) {
+    /// Records the moment of waking, and the goal it is measured against.
+    /// Writing it twice on one day overwrites, so a mis-tap can be corrected
+    /// by tapping again.
+    func recordWake(at date: Date, existing logs: [MorningLog], goalMinutes: Int) {
         let day = calendar.startOfDay(for: date)
         if let today = log(logs, dayOf: date) {
             today.wakeAt = date
+            today.goalMinutes = goalMinutes
         } else {
-            context.insert(MorningLog(day: day, wakeAt: date))
+            context.insert(MorningLog(day: day, wakeAt: date, goalMinutes: goalMinutes))
         }
         save()
     }
@@ -107,16 +127,19 @@ final class MorningLogStore {
         guard let wake = settings.impliedWake(routineStart: start, existingWake: existing, calendar: calendar) else {
             return false
         }
-        recordWake(at: wake, existing: logs)
+        recordWake(at: wake, existing: logs, goalMinutes: settings.targetWakeMinutes)
         return true
     }
 
-    func setWake(_ wakeAt: Date?, on date: Date, existing logs: [MorningLog]) {
+    func setWake(_ wakeAt: Date?, on date: Date, existing logs: [MorningLog], goalMinutes: Int) {
         let day = calendar.startOfDay(for: date)
         if let today = log(logs, dayOf: date) {
             today.wakeAt = wakeAt
+            // Clearing the wake leaves the goal alone: the morning still
+            // happened under it, and logging a wake again is the same day.
+            if wakeAt != nil { today.goalMinutes = goalMinutes }
         } else if let wakeAt {
-            context.insert(MorningLog(day: day, wakeAt: wakeAt))
+            context.insert(MorningLog(day: day, wakeAt: wakeAt, goalMinutes: goalMinutes))
         }
         save()
     }

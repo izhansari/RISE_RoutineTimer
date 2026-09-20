@@ -71,6 +71,10 @@ struct ActiveRoutineView: View {
     @State private var confirmingEnd = false
     @State private var confirmingSkip = false
     @State private var showingRunSheet = false
+    /// A finger is down on the check mark. The chip is drawn inside the fill
+    /// and its button lives in the overlay, so the press has to be carried
+    /// across by hand for the drawn chip to answer it.
+    @State private var checkPressed = false
     /// The bar's centre flips from "done at" to elapsed for a moment on tap.
     @State private var showingElapsed = false
     @State private var elapsedFlash: Task<Void, Never>?
@@ -155,9 +159,18 @@ struct ActiveRoutineView: View {
             )
         }
         .receiptDialog(isPresented: $confirmingSkip, title: "Skip this step?") {
-            ReceiptDialogAction.destructive("Skip it") { engine.skipCurrentStep() }
+            ReceiptDialogAction.destructive("Skip it") {
+                // Skipping the last step still finishes the routine.
+                let finishing = engine.isOnLastStep
+                RoutineHaptics.shared.stepSkipped()
+                engine.skipCurrentStep()
+                if finishing { RoutineHaptics.shared.routineComplete() }
+            }
             if !engine.isOnLastStep {
-                ReceiptDialogAction.quiet("Move to the end") { engine.moveCurrentStepToEnd() }
+                ReceiptDialogAction.quiet("Move to the end") {
+                    RoutineHaptics.shared.stepSkipped()
+                    engine.moveCurrentStepToEnd()
+                }
             }
             ReceiptDialogAction.quiet("Cancel") {}
         }
@@ -318,8 +331,20 @@ struct ActiveRoutineView: View {
             // chips. The placeholder opposite skip keeps the check centred.
             HStack(spacing: 20) {
                 Color.clear.frame(width: 46, height: 46)
-                hitTarget(diameter: checkDiameter, label: isRequired ? "Complete step" : "Finish this step early") {
+                hitTarget(
+                    diameter: checkDiameter,
+                    label: isRequired ? "Complete step" : "Finish this step early",
+                    onPress: { pressed in
+                        checkPressed = pressed
+                        if pressed { RoutineHaptics.shared.pressDown() }
+                    }
+                ) {
+                    // The last step's chunk runs straight into the routine's
+                    // flourish; see `RoutineHaptics`.
+                    let finishing = engine.isOnLastStep
+                    RoutineHaptics.shared.stepDone()
                     engine.completeCurrentStep()
+                    if finishing { RoutineHaptics.shared.routineComplete() }
                 }
                 hitTarget(diameter: 46, label: "Skip or defer this step") {
                     confirmingSkip = true
@@ -338,13 +363,18 @@ struct ActiveRoutineView: View {
     }
 
     /// An invisible button the size of a drawn chip.
-    private func hitTarget(diameter: CGFloat, label: String, action: @escaping () -> Void) -> some View {
+    private func hitTarget(
+        diameter: CGFloat,
+        label: String,
+        onPress: @escaping (Bool) -> Void = { _ in },
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             Color.clear
                 .frame(width: diameter, height: diameter)
                 .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressReportingStyle(onPress: onPress))
         .accessibilityLabel(label)
     }
 
@@ -356,7 +386,11 @@ struct ActiveRoutineView: View {
     private func chipRow(textColor: Color) -> some View {
         HStack(spacing: 20) {
             Color.clear.frame(width: 46, height: 46)
+            // Pressed in while a finger is on it. It snaps rather than eases
+            // — nothing inside the fill animates — which suits a control
+            // that answers with a click.
             chip("checkmark", diameter: checkDiameter, weight: .light, textColor: textColor)
+                .scaleEffect(checkPressed ? 0.93 : 1)
             chip("forward.end", diameter: 46, weight: .regular, textColor: textColor)
         }
     }
@@ -533,12 +567,14 @@ struct ActiveRoutineView: View {
     }
 }
 
-/// The one place motion is allowed on this screen: a press response on the
-/// controls. Everything else snaps, so the digits can never crossfade.
-private struct PressScaleStyle: ButtonStyle {
+/// The check and skip hit targets are invisible, so there is nothing here to
+/// scale; what they need is to *report* the press, so the chip drawn inside
+/// the fill can answer it and the haptic can land with the finger.
+private struct PressReportingStyle: ButtonStyle {
+    let onPress: (Bool) -> Void
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.93 : 1)
-            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
+            .onChange(of: configuration.isPressed) { _, pressed in onPress(pressed) }
     }
 }

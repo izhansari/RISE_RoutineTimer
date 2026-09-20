@@ -23,22 +23,33 @@ nonisolated struct StepSuggestion: Equatable, Identifiable {
 nonisolated struct RoutineStats {
     /// Completed sessions, newest first.
     let completed: [SessionResult]
+    /// The completed sessions in which, near enough, every step happened
+    /// (`SessionResult.isFullRun`). How long the routine takes — average,
+    /// best, trend — is only ever asked of these: a morning with coffee
+    /// skipped is twelve minutes quicker than any real one, and used to
+    /// become the best time and pull the average down with it. The streak
+    /// and the per-step stats still read every completed run.
+    let fullRuns: [SessionResult]
     let calendar: Calendar
 
     init(sessions: [SessionResult], calendar: Calendar = .current) {
         completed = sessions.filter(\.completed).sorted { $0.startedAt > $1.startedAt }
+        fullRuns = completed.filter(\.isFullRun)
         self.calendar = calendar
     }
 
     var count: Int { completed.count }
 
+    /// Completed runs left out of the average, best and trend.
+    var partialCount: Int { completed.count - fullRuns.count }
+
     var averageActiveSeconds: Int? {
-        guard !completed.isEmpty else { return nil }
-        return completed.reduce(0) { $0 + $1.activeSeconds } / completed.count
+        guard !fullRuns.isEmpty else { return nil }
+        return fullRuns.reduce(0) { $0 + $1.activeSeconds } / fullRuns.count
     }
 
     var bestActiveSeconds: Int? {
-        completed.map(\.activeSeconds).min()
+        fullRuns.map(\.activeSeconds).min()
     }
 
     var latest: SessionResult? { completed.first }
@@ -50,12 +61,12 @@ nonisolated struct RoutineStats {
         return total / completed.count
     }
 
-    /// Average of the last `window` sessions versus the ones before them.
+    /// Average of the last `window` full runs versus the ones before them.
     /// Negative means recent sessions are faster.
     func recentTrendSeconds(window: Int = 5) -> Int? {
-        guard completed.count >= window * 2 else { return nil }
-        let recent = completed.prefix(window).reduce(0) { $0 + $1.activeSeconds } / window
-        let earlier = completed.dropFirst(window).prefix(window).reduce(0) { $0 + $1.activeSeconds } / window
+        guard fullRuns.count >= window * 2 else { return nil }
+        let recent = fullRuns.prefix(window).reduce(0) { $0 + $1.activeSeconds } / window
+        let earlier = fullRuns.dropFirst(window).prefix(window).reduce(0) { $0 + $1.activeSeconds } / window
         return recent - earlier
     }
 

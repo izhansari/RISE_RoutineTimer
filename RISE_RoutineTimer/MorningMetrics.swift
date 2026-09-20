@@ -91,6 +91,13 @@ nonisolated struct MorningRecord: Equatable, Identifiable {
     var routineStartAt: Date?
     var routineEndAt: Date?
     var completedRoutine: Bool = false
+    /// Time spent doing the routine, pauses excluded, when the timer measured
+    /// it. Nil for a record built from clock times alone.
+    var routineActiveSeconds: Int?
+    /// The wake goal this morning was actually held to, as recorded at the
+    /// time. Nil for a morning logged before goals were stored, which falls
+    /// back to the current one. See `MorningLog.goalMinutes`.
+    var goalMinutes: Int?
 
     var id: Date { day }
 
@@ -102,11 +109,24 @@ nonisolated struct MorningRecord: Equatable, Identifiable {
         wakeAt != nil && routineStartAt != nil && routineEndAt != nil
     }
 
-    /// Minutes past the target wake time. Negative means up early.
+    /// Minutes past the wake goal *this morning was held to*. Negative means
+    /// up early.
+    ///
+    /// It used to measure against whatever the goal is now, so moving the
+    /// goal rewrote the whole record behind it — fatal for an app whose
+    /// purpose is walking the wake time earlier, because each move erased
+    /// the evidence of the last one. The current goal is the fallback only
+    /// for mornings recorded before goals were stored.
     func snoozeMinutes(settings: MorningSettings, calendar: Calendar = .current) -> Int? {
         guard let wakeAt else { return nil }
-        let target = settings.targetWake(on: wakeAt, calendar: calendar)
+        let target = calendar.startOfDay(for: wakeAt)
+            .addingTimeInterval(TimeInterval(goal(settings: settings) * 60))
         return Int((wakeAt.timeIntervalSince(target) / 60).rounded())
+    }
+
+    /// The goal to score this morning against.
+    func goal(settings: MorningSettings) -> Int {
+        goalMinutes ?? settings.targetWakeMinutes
     }
 
     /// Minutes between waking and starting the routine. Nil when the routine
@@ -117,9 +137,22 @@ nonisolated struct MorningRecord: Equatable, Identifiable {
         return Int((routineStartAt.timeIntervalSince(wakeAt) / 60).rounded())
     }
 
-    /// Minutes the routine itself took.
+    /// Minutes the routine itself took — the time spent *doing* it.
+    ///
+    /// The web app's version is end minus start, because there a morning is
+    /// three taps and nothing can be paused. Here the timer can be, and end
+    /// minus start counted the pause as routine: a 41-minute morning with a
+    /// 28-minute phone call in the middle was plotted as 69 minutes, while
+    /// the session list beside the chart — and the average, and the best —
+    /// said 40:49. So the measured active time wins when there is one, and
+    /// the clock is the fallback. With no pause the two are the same number,
+    /// which keeps this in agreement with MorningCheckin for every morning
+    /// that app can describe.
     var durationMinutes: Int? {
         guard let routineStartAt, let routineEndAt else { return nil }
+        if let routineActiveSeconds {
+            return Int((Double(routineActiveSeconds) / 60).rounded())
+        }
         return Int((routineEndAt.timeIntervalSince(routineStartAt) / 60).rounded())
     }
 
@@ -229,10 +262,15 @@ nonisolated struct MorningMetrics {
 
     /// Minutes of `metric` spent so far this week. Only overruns count — being
     /// up early doesn't earn credit to spend on a later lie-in.
-    func weeklyBudgetUsed(_ metric: Metric, now: Date = Date()) -> Int {
+    ///
+    /// - Parameter excludedDay: a day to leave out. The Today tab passes
+    ///   today, so it can draw the week already spent and then today's own
+    ///   share growing on the end of it while you spend it.
+    func weeklyBudgetUsed(_ metric: Metric, now: Date = Date(), excluding excludedDay: Date? = nil) -> Int {
         let start = startOfWeek(containing: now)
+        let excluded = excludedDay.map { calendar.startOfDay(for: $0) }
         return records
-            .filter { $0.day >= start }
+            .filter { $0.day >= start && $0.day != excluded }
             .compactMap { value(metric, for: $0) }
             .filter { $0 > 0 }
             .reduce(0, +)
