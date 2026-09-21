@@ -75,6 +75,10 @@ final class RoutineHaptics {
     // MARK: - Playing
 
     private var engine: CHHapticEngine?
+    /// `CHHapticEngine.start()` is not free, and it was being called on
+    /// every press *and* every play. The engine tells us when it stops, so
+    /// tracking it is enough.
+    private var isRunning = false
     private let supportsHaptics = CHHapticEngine.capabilitiesForHardware().supportsHaptics
     private let pressGenerator = UIImpactFeedbackGenerator(style: .soft)
     private let fallbackGenerator = UIImpactFeedbackGenerator(style: .rigid)
@@ -129,20 +133,29 @@ final class RoutineHaptics {
                 // call, backgrounding). Drop it and build a fresh one on the
                 // next press rather than trying to revive this one.
                 made.stoppedHandler = { [weak self] _ in
-                    Task { @MainActor in self?.engine = nil }
+                    Task { @MainActor in
+                        self?.engine = nil
+                        self?.isRunning = false
+                    }
                 }
                 made.resetHandler = { [weak self] in
-                    Task { @MainActor in self?.engine = nil }
+                    Task { @MainActor in
+                        self?.engine = nil
+                        self?.isRunning = false
+                    }
                 }
                 engine = made
             } catch {
                 return nil
             }
         }
+        guard !isRunning else { return engine }
         do {
             try engine?.start()
+            isRunning = true
         } catch {
             engine = nil
+            isRunning = false
         }
         return engine
     }

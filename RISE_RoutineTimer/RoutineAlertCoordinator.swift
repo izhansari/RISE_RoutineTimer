@@ -59,6 +59,9 @@ final class RoutineAlertCoordinator {
 
         switch event {
         case .started:
+            // Build the players and resolve the voice now, so the first
+            // check mark of the morning is as cheap as the rest.
+            alerts.warmUp()
             runStarted(engine.routineStartDate ?? Date())
         case .resumed:
             syncNotifications()

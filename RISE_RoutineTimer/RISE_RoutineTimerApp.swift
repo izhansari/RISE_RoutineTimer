@@ -64,6 +64,10 @@ struct RISE_RoutineTimerApp: App {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 alertCoordinator.applicationDidBecomeActive()
+            } else {
+                // Run saves are queued off the main thread; this is the last
+                // moment before iOS may kill us, so make sure they landed.
+                engine.flushToDisk()
             }
             syncIdleTimer()
         }

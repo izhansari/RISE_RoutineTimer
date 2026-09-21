@@ -13,6 +13,8 @@ import Observation
 protocol RunStore {
     func load() -> RoutineRun?
     func save(_ run: RoutineRun?)
+    /// Waits for anything queued to reach the disk.
+    func flush()
 }
 
 /// Stores the in-flight run as a file in Application Support.
@@ -41,6 +43,8 @@ final class FileRunStore: RunStore {
     /// just ended — which is exactly the bug this store was written to fix,
     /// reappearing through the migration path.
     private let migratedMarker: URL
+    /// Serialises every read-modify-write of the run file.
+    private let queue = DispatchQueue(label: "com.betternorms.rise.runstore")
 
     init(directory: URL? = nil, legacyDefaults: UserDefaults? = .standard) {
         let folder = directory ?? FileManager.default
@@ -51,31 +55,60 @@ final class FileRunStore: RunStore {
         self.legacyDefaults = legacyDefaults
     }
 
+    /// On the same queue as the writes, so a read can never overtake one
+    /// that is still queued. It happens once, at launch, so the wait costs
+    /// nothing.
     func load() -> RoutineRun? {
-        if let data = try? Data(contentsOf: url) {
+        queue.sync {
+            if let data = try? Data(contentsOf: url) {
+                return try? JSONDecoder().decode(RoutineRun.self, from: data)
+            }
+            guard !hasMigrated else { return nil }
+            markMigrated()
+            guard let legacyDefaults, let data = legacyDefaults.data(forKey: legacyKey) else { return nil }
+            legacyDefaults.removeObject(forKey: legacyKey)
             return try? JSONDecoder().decode(RoutineRun.self, from: data)
         }
-        guard !hasMigrated else { return nil }
-        markMigrated()
-        guard let legacyDefaults, let data = legacyDefaults.data(forKey: legacyKey) else { return nil }
-        legacyDefaults.removeObject(forKey: legacyKey)
-        return try? JSONDecoder().decode(RoutineRun.self, from: data)
     }
 
+    /// Saving a run is asynchronous; **removing one is not**.
+    ///
+    /// The write was on the main thread, inside the check mark's tap. It is
+    /// only a couple of milliseconds, but it is a couple of milliseconds of
+    /// disk in a handler that has to return within a frame, and there is no
+    /// reason for the UI to wait on it.
+    ///
+    /// The delete stays synchronous, and on the same queue, so it can never
+    /// overtake or be overtaken by a queued write. That ordering is the whole
+    /// point of this store: a removal that is still pending when iOS kills
+    /// the app is exactly how an ended routine used to come back from the
+    /// dead under `UserDefaults`, and doing the delete off-thread would have
+    /// reintroduced it through the back door.
     func save(_ run: RoutineRun?) {
-        // Any save means this store owns the run from here on.
-        markMigrated()
-        legacyDefaults?.removeObject(forKey: legacyKey)
-
-        guard let run, let data = try? JSONEncoder().encode(run) else {
-            try? FileManager.default.removeItem(at: url)
+        guard let run else {
+            queue.sync {
+                markMigrated()
+                legacyDefaults?.removeObject(forKey: legacyKey)
+                try? FileManager.default.removeItem(at: url)
+            }
             return
         }
-        do {
-            try data.write(to: url, options: .atomic)
-        } catch {
-            print("Could not save the active run: \(error)")
+        queue.async { [self] in
+            markMigrated()
+            legacyDefaults?.removeObject(forKey: legacyKey)
+            guard let data = try? JSONEncoder().encode(run) else { return }
+            do {
+                try data.write(to: url, options: .atomic)
+            } catch {
+                print("Could not save the active run: \(error)")
+            }
         }
+    }
+
+    /// Waits for every queued write to land. Called when the app leaves the
+    /// foreground, which is the moment before iOS may kill it.
+    func flush() {
+        queue.sync {}
     }
 
     private var hasMigrated: Bool {
@@ -92,6 +125,7 @@ final class InMemoryRunStore: RunStore {
     var stored: RoutineRun?
     func load() -> RoutineRun? { stored }
     func save(_ run: RoutineRun?) { stored = run }
+    func flush() {}
 }
 
 @Observable
@@ -575,6 +609,12 @@ final class RoutineEngine {
 
     private func persist() {
         store?.save(run)
+    }
+
+    /// Pushes anything still queued to disk — the app is leaving the
+    /// foreground and may not come back.
+    func flushToDisk() {
+        store?.flush()
     }
 
     private func emit(_ event: Event) {

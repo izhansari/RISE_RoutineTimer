@@ -543,6 +543,28 @@ All three from looking at it on the phone.
 - **The chart fills the vertical space** it was wasting on a `Spacer`.
 - **Settings moves off the tab bar** to a gear in Today's header; two tabs left, Today and Run.
 
+### Run 32 — The check mark answers the finger (2026-09-21)
+
+The owner: *"go take a look at the delay when clicking the check mark button. I feel like there's just a little bit of
+a lag or a hang, and the haptic has a lag as well."* Measured with temporary instrumentation rather than guessed, and
+the numbers made the cause obvious: the tap handler was doing audio work.
+
+| | before | after |
+|---|---|---|
+| steady tap | 22.0 – 32.6 ms | 1.17 – 2.93 ms |
+| first step of a run | 264.8 ms | 0.74 ms |
+
+- **All audio moved off the main thread** into `RoutineSound`, a private class behind a serial queue.
+  `AVAudioSession.setActive` was 73 ms, the first `speak` 110 ms, and a fresh `AVAudioPlayer` per chime re-read and
+  re-decoded the file every single step (11–18 ms warm, 80 ms cold). Players are cached, the voice is resolved once,
+  and `warmUp()` on `.started` pays the cold cost while nothing is waiting on it.
+- **The run file is written asynchronously and deleted synchronously.** The write had no business being in the tap;
+  the delete has to stay ordered against it, because a pending removal when iOS kills the app is the exact
+  `UserDefaults` bug `FileRunStore` was written to end. `flushToDisk()` on leaving the foreground.
+- **The haptic engine is no longer `start()`ed on every press and play** — `isRunning`, cleared by the engine's own
+  stopped/reset handlers.
+- Still 164 tests; the change is a threading one and the existing suite covers the behaviour.
+
 ### Later (next)
 17. iCloud sync via SwiftData + CloudKit (decide **before** run 2: CloudKit requires all properties to have defaults and all relationships optional, which constrains the `RoutineSession` design).
 18. Multiple routines / profiles if "our routine" means more than one person.
