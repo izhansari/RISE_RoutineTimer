@@ -754,7 +754,8 @@ private struct BudgetPips: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(title) budget")
         .accessibilityValue(
-            (isOver ? "\(spent - budget) minutes over" : "\(budget - spent) of \(budget) minutes left")
+            "\(spent) of \(budget) minutes used"
+            + (isOver ? ", \(spent - budget) over" : "")
             + (isBreathing ? ", being spent now" : "")
         )
     }
@@ -775,7 +776,10 @@ private struct BudgetPips: View {
                     .background(color, in: Capsule())
             }
             Spacer()
-            Text(isOver ? "\(spent - budget) OVER" : "\(budget - spent) LEFT")
+            // Spent *of* the budget, not "left" or "over". Either of those is
+            // a distance from a number the row never printed, so 16 LEFT read
+            // the same whether the week's allowance was 20 minutes or 90.
+            Text("\(spent) OF \(budget) MIN")
                 .font(.system(size: 9, weight: .semibold))
                 .tracking(1.2)
                 .foregroundStyle(isOver ? color : .secondary)
