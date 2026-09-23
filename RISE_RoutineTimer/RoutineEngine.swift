@@ -136,6 +136,9 @@ final class RoutineEngine {
         case paused
         case stepStarted(index: Int, auto: Bool)
         case overtimeStarted(index: Int)
+        /// The current step was switched between auto-next and manual by
+        /// hand, mid-run. What notifications are pending depends on it.
+        case autoNextChanged(index: Int, autoNext: Bool)
         case completed(SessionResult)
         case abandoned(SessionResult)
         case reset
@@ -448,6 +451,36 @@ final class RoutineEngine {
         updated.steps[index].notes = notes
         run = updated
         persist()
+    }
+
+    /// Flips the current step between auto-next and manual **for this run
+    /// only**. The saved `RoutineStep` is deliberately untouched: this is
+    /// "not today", not a change of mind about the routine. The run's frozen
+    /// copy is exactly the right place for it — it is already the record of
+    /// what is actually happening this morning, as opposed to what was
+    /// planned.
+    ///
+    /// Refused once the step is in overtime, and that is not a limitation.
+    /// `tick()` advances an auto step the instant it expires, so a step that
+    /// has run past its time is *already* waiting on you — overtime and
+    /// manual are the same condition, and the badge already reads MANUAL.
+    /// Without the guard, flipping to AUTO in overtime would have the next
+    /// tick complete the step immediately and record it at its **planned**
+    /// duration, throwing away the minutes actually spent.
+    ///
+    /// - Returns: whether the flip happened, so the caller knows to answer
+    ///   the finger.
+    @discardableResult
+    func toggleAutoNextForCurrentStep() -> Bool {
+        guard var updated = run, updated.phase == .running,
+              updated.steps.indices.contains(updated.currentIndex),
+              !isOvertime else { return false }
+        let index = updated.currentIndex
+        updated.steps[index].autoNext.toggle()
+        run = updated
+        persist()
+        emit(.autoNextChanged(index: index, autoNext: updated.steps[index].autoNext))
+        return true
     }
 
     func abandon(at date: Date = Date()) {

@@ -78,6 +78,11 @@ final class RoutineAlertCoordinator {
             if engine.steps.indices.contains(index) {
                 alerts.overtime(engine.steps[index], sounds: soundsEnabled, voice: voiceEnabled)
             }
+        case .autoNextChanged:
+            // The whole shape of the plan changed: an auto chain is
+            // scheduled whole, and a manual step gets overtime nudges
+            // instead of a next-step end. Re-ask the engine.
+            syncNotifications()
         case .completed(let result):
             RoutineNotificationManager.cancelRunAlerts()
             let byHand = result.steps.last?.autoAdvanced == false

@@ -53,6 +53,17 @@ nonisolated enum ActiveScreenSettings {
 }
 
 /// Where the step name ended up, so the notes tap target can sit on top of it.
+/// Where the AUTO / MANUAL badge landed, so its tap target can be placed
+/// over it from the control layer. Same reason as `TitleBoundsKey`: the
+/// badge is drawn inside the fill's content closure, which runs twice, so
+/// the button itself must live outside it.
+private struct BadgeBoundsKey: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = value ?? nextValue()
+    }
+}
+
 private struct TitleBoundsKey: PreferenceKey {
     static let defaultValue: Anchor<CGRect>? = nil
     static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
@@ -103,6 +114,12 @@ struct ActiveRoutineView: View {
     private var pace: StepPace { StepPace(overtimeSeconds: engine.overtimeSeconds) }
     private var hasNotes: Bool { engine.currentStep?.hasNotes == true }
 
+    /// Overtime already means "this step is waiting on you", so there is
+    /// nothing left to toggle — see `RoutineEngine.toggleAutoNextForCurrentStep`.
+    private var canToggleAutoNext: Bool {
+        engine.isRunning && !engine.isPaused && !engine.isOvertime
+    }
+
     var body: some View {
         GeometryReader { geo in
             let insets = geo.safeAreaInsets
@@ -145,6 +162,38 @@ struct ActiveRoutineView: View {
                         .frame(width: frame.width, height: frame.height)
                         .position(x: frame.midX, y: frame.midY)
                         .accessibilityLabel("Show notes for \(engine.currentStep?.title ?? "this step")")
+                    }
+                    .ignoresSafeArea()
+                }
+            }
+            // The badge flips the step between auto and manual for this run.
+            // Same placement trick as the title, and for the same reason.
+            .overlayPreferenceValue(BadgeBoundsKey.self) { anchor in
+                if let anchor, canToggleAutoNext {
+                    GeometryReader { proxy in
+                        let frame = proxy[anchor]
+                        Button {
+                            if engine.toggleAutoNextForCurrentStep() {
+                                RoutineHaptics.shared.selectionChanged()
+                            }
+                        } label: {
+                            Color.clear.contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        // A 9pt capsule is a small target; give it the 44pt
+                        // the finger expects without moving what is drawn.
+                        .frame(width: max(frame.width, 88), height: max(frame.height, 44))
+                        .position(x: frame.midX, y: frame.midY)
+                        .accessibilityLabel(
+                            engine.currentStep?.autoNext == false
+                                ? "Manual step, waits for you"
+                                : "Automatic step, advances on its own"
+                        )
+                        .accessibilityHint(
+                            engine.currentStep?.autoNext == false
+                                ? "Double tap to let this step advance on its own, just for this run"
+                                : "Double tap to make this step wait for you, just for this run"
+                        )
                     }
                     .ignoresSafeArea()
                 }
@@ -253,9 +302,10 @@ struct ActiveRoutineView: View {
                 .minimumScaleFactor(0.5)
                 .anchorPreference(key: TitleBoundsKey.self, value: .bounds) { $0 }
 
-            // What kind of step this is, stated once and permanently. It is
-            // not a status message — overtime is the fill colour's job — so
-            // the wording never changes while the step runs.
+            // What kind of step this is — and, since it is tappable, what
+            // you can make it instead. Still not a status message: overtime
+            // is the fill colour's job, so this never changes on its own.
+            // It changes only when you change it.
             Text(engine.currentStep?.autoNext == false ? "MANUAL" : "AUTO")
                 .font(.system(size: 9, weight: .semibold))
                 .tracking(2)
@@ -266,11 +316,8 @@ struct ActiveRoutineView: View {
                     Capsule().strokeBorder(textColor.opacity(0.35), lineWidth: 1)
                 }
                 .padding(.top, 12)
-                .accessibilityLabel(
-                    engine.currentStep?.autoNext == false
-                        ? "Manual step, waits for you"
-                        : "Automatic step, advances on its own"
-                )
+                .anchorPreference(key: BadgeBoundsKey.self, value: .bounds) { $0 }
+                .accessibilityHidden(true)
 
             // The FLIP rule: a hard bar between the label and the digits.
             Rectangle()

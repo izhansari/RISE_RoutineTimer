@@ -82,6 +82,7 @@ final class RoutineHaptics {
     private let supportsHaptics = CHHapticEngine.capabilitiesForHardware().supportsHaptics
     private let pressGenerator = UIImpactFeedbackGenerator(style: .soft)
     private let fallbackGenerator = UIImpactFeedbackGenerator(style: .rigid)
+    private let selectionGenerator = UISelectionFeedbackGenerator()
 
     /// The finger has landed on the check mark.
     func pressDown() {
@@ -98,6 +99,13 @@ final class RoutineHaptics {
     /// A lighter acknowledgement, for skipping or deferring a step.
     func stepSkipped() {
         pressGenerator.impactOccurred(intensity: 1)
+    }
+
+    /// A setting was flipped by hand — the AUTO / MANUAL badge. The picker
+    /// tick, which is what the schedule tape uses when the playhead crosses
+    /// into a step: this is a selection changing, not an impact.
+    func selectionChanged() {
+        selectionGenerator.selectionChanged()
     }
 
     /// The last step was ticked off.

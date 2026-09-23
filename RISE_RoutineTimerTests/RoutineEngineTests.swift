@@ -412,6 +412,82 @@ final class RoutineEngineTests: XCTestCase {
         XCTAssertTrue(engine.plannedAlerts(at: at(10)).isEmpty)
     }
 
+    // MARK: - Flipping auto / manual mid-run
+
+    func testTogglingAutoNextChangesOnlyTheCurrentStepAndOnlyThisRun() {
+        let (engine, log) = startedEngine()
+        XCTAssertEqual(engine.currentStep?.autoNext, true)
+
+        XCTAssertTrue(engine.toggleAutoNextForCurrentStep())
+
+        XCTAssertEqual(engine.currentStep?.autoNext, false)
+        XCTAssertEqual(engine.steps[1].autoNext, true, "the step after it is untouched")
+        XCTAssertEqual(engine.steps[2].autoNext, false, "and so is one that was already manual")
+        XCTAssertEqual(log.events.last, .autoNextChanged(index: 0, autoNext: false))
+
+        // The saved routine is a separate thing entirely: the run holds a
+        // frozen copy, which is the whole reason this is "just for today".
+        XCTAssertEqual(makeSteps()[0].autoNext, true)
+    }
+
+    func testTogglingAutoNextGoesBothWays() {
+        let (engine, _) = startedEngine()
+        engine.toggleAutoNextForCurrentStep()
+        engine.toggleAutoNextForCurrentStep()
+        XCTAssertEqual(engine.currentStep?.autoNext, true)
+    }
+
+    /// A step past its time is already waiting on you — `tick()` advances an
+    /// auto step the instant it expires — so there is nothing to toggle. The
+    /// guard also stops a flip to AUTO completing the step on the next tick
+    /// and recording it at its planned duration.
+    func testAnOvertimeStepCannotBeToggled() {
+        let (engine, _) = startedEngine()
+        engine.toggleAutoNextForCurrentStep()          // step 0 becomes manual
+        engine.tick(at: at(200))                       // 80s past its 120s plan
+        XCTAssertTrue(engine.isOvertime)
+
+        XCTAssertFalse(engine.toggleAutoNextForCurrentStep())
+        XCTAssertEqual(engine.currentStep?.autoNext, false, "still manual")
+        XCTAssertEqual(engine.currentIndex, 0, "and still on the same step")
+    }
+
+    func testTogglingToManualStopsTheStepAutoAdvancing() {
+        let (engine, _) = startedEngine()
+        engine.toggleAutoNextForCurrentStep()
+        engine.tick(at: at(300))
+
+        XCTAssertEqual(engine.currentIndex, 0, "a manual step waits however long it takes")
+        XCTAssertEqual(engine.overtimeSeconds, 180)
+    }
+
+    /// The notification plan is shaped by `autoNext`: an auto chain is laid
+    /// out whole, a manual step ends the chain and earns overtime nudges.
+    func testTogglingReshapesThePlannedAlerts() {
+        let (engine, _) = startedEngine()
+        let asAuto = engine.plannedAlerts(at: t0)
+        XCTAssertEqual(asAuto.filter { $0.kind == .stepEnd }.map(\.stepIndex), [0, 1, 2],
+                       "the chain runs through the auto steps to the first manual one")
+
+        engine.toggleAutoNextForCurrentStep()
+        let asManual = engine.plannedAlerts(at: t0)
+
+        XCTAssertEqual(asManual.first?.kind, .stepEnd)
+        XCTAssertEqual(asManual.dropFirst().map(\.kind),
+                       RoutineEngine.overtimeNudgeMinutes.map { .overtime(minutes: $0) },
+                       "the chain stops here, and the step gets its nudges")
+        XCTAssertTrue(asManual.allSatisfy { $0.stepIndex == 0 })
+    }
+
+    func testTogglingIsIgnoredWhenNothingIsRunning() {
+        let (engine, _) = makeEngine()
+        XCTAssertFalse(engine.toggleAutoNextForCurrentStep())
+
+        let (running, _) = startedEngine()
+        running.pause(at: at(10))
+        XCTAssertFalse(running.toggleAutoNextForCurrentStep(), "a paused run is not running")
+    }
+
     // MARK: - Formatting helpers used by alerts
 
     func testSpokenDuration() {
