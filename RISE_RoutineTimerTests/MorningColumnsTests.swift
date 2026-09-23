@@ -139,11 +139,24 @@ final class MorningColumnsTests: XCTestCase {
 
     /// A week of mornings within twenty minutes of each other would otherwise
     /// be stretched to fill the chart and look wildly erratic.
-    func testAQuietWeekStillGetsThreeHours() {
+    ///
+    /// Two hours, not three. At three a real week — seventy minutes from the
+    /// earliest cap to the latest end — drew inside the top third of the plot
+    /// with the whole bottom half blank, because whole-hour rounding had
+    /// already given it two hours before the floor added a third.
+    func testAQuietWeekStillGetsTwoHours() {
         let scale = ClockScale(columns: [MorningColumn(day: day(0), goal: 390, wake: 395, start: 405, end: 430)], goal: 390)
-        XCTAssertEqual(scale.upper - scale.lower, 180)
+        XCTAssertEqual(scale.upper - scale.lower, 120)
         XCTAssertLessThanOrEqual(scale.lower, 360)
         XCTAssertGreaterThanOrEqual(scale.upper, 480)
+    }
+
+    /// The floor still bites when a week really is tight: forty minutes
+    /// inside a single hour rounds to one hour, and one hour of clock makes
+    /// twenty minutes of variation look like chaos.
+    func testAWeekInsideOneHourIsStillGivenTwo() {
+        let scale = ClockScale(columns: [MorningColumn(day: day(0), goal: 370, wake: 372, start: 380, end: 405)], goal: 370)
+        XCTAssertEqual(scale.upper - scale.lower, 120)
     }
 
     func testAGrowingColumnStaysOnTheClockAndStraysAreClamped() {

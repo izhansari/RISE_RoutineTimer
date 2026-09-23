@@ -176,7 +176,7 @@ nonisolated struct ClockScale: Equatable {
     let lower: Int
     let upper: Int
 
-    static let minimumSpan = 180
+    static let minimumSpan = 120
     /// Further than this from the middle of the rest, a moment is a stray.
     static let strayDistance = 300
 

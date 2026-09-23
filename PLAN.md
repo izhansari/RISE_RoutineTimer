@@ -565,6 +565,28 @@ the numbers made the cause obvious: the tap handler was doing audio work.
   stopped/reset handlers.
 - Still 164 tests; the change is a threading one and the existing suite covers the behaviour.
 
+### Run 33 — Small things, from using it (2026-09-23)
+
+Three tweaks from the owner actually running the app, plus a design pass over Today.
+
+- **The budget rows say spent *of* budget** — `7 OF 60 MIN`. `16 LEFT` and `16 OVER` are both a distance from a
+  number the row never printed, so they read the same whether the week's allowance was 20 minutes or 90.
+- **The week chart's clock floor drops from 3 h to 2 h.** Whole-hour rounding already gives a normal week two
+  hours, so the floor was only adding a third, empty one: measured on a seeded week the marks used 36% of the plot
+  and everything below 7:35 was blank. At 2 h they use 54%, and the floor now only fires when a week sits inside a
+  single hour — which is the case it was written for.
+- **Tapping the AUTO / MANUAL badge flips the step, for this run only.** It writes to the run's frozen `[RunStep]`,
+  never the saved `RoutineStep`. The tap target lives in the control layer (`BadgeBoundsKey`), since the badge is
+  drawn inside the fill's double-rendered content; flipping reschedules notifications, because `plannedAlerts` is
+  shaped by `autoNext`; and it is refused in overtime, where auto would complete the step on the next tick and
+  record it at its *planned* duration.
+- 164 → 171 tests.
+
+**Still open from the Today critique** (raised, not yet acted on): the `--:--` placeholder in the receipt face reads
+as a rendering fault and is the most common non-morning state; "Good evening" is the largest type on the screen and
+carries no information while `GOAL 6:30AM` is 11pt grey; today's empty column is a full-height grey band that reads
+as a placeholder; the budget pips round down, so `7 OF 60 MIN` sits beside five minutes of drawing.
+
 ### Later (next)
 17. iCloud sync via SwiftData + CloudKit (decide **before** run 2: CloudKit requires all properties to have defaults and all relationships optional, which constrains the `RoutineSession` design).
 18. Multiple routines / profiles if "our routine" means more than one person.
