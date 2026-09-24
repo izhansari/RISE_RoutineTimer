@@ -110,6 +110,10 @@ struct MorningColumnsChart: View {
     /// somewhere else. Today uses this so selecting a day cannot move
     /// anything on a screen that has to fit exactly once.
     var annotatesSelection = false
+    /// Night columns have their cap at the start, so the gap label between
+    /// cap and box (always "0m") is left off and the spoken form says
+    /// "started" rather than "woke".
+    var kind: RoutineKind = .morning
     let label: (MorningColumn) -> String
 
     private let gutter: CGFloat = 36
@@ -171,7 +175,7 @@ struct MorningColumnsChart: View {
                     )
                     .frame(width: step)
                     .accessibilityElement()
-                    .accessibilityLabel(Self.spoken(column, label: label(column)))
+                    .accessibilityLabel(Self.spoken(column, label: label(column), kind: kind))
                     .accessibilityAddTraits(selection == nil ? [] : .isButton)
                     .accessibilityAction { selection?.wrappedValue = index }
                 }
@@ -222,7 +226,7 @@ struct MorningColumnsChart: View {
         if let wake = column.wake {
             labels.append(PlacedLabel(y: y(wake), text: MorningColumnsChart.clockText(wake), color: .primary))
         }
-        if let wake = column.wake, let start = column.start, let lag = column.lag {
+        if kind == .morning, let wake = column.wake, let start = column.start, let lag = column.lag {
             labels.append(PlacedLabel(y: (y(wake) + y(start)) / 2, text: "\(lag)m", color: MorningColumnInk.lag))
         }
         if let start = column.start, let end = column.end, let minutes = column.routineMinutes {
@@ -316,11 +320,11 @@ struct MorningColumnsChart: View {
         return "\((m / 60 + 11) % 12 + 1):" + String(format: "%02d", m % 60)
     }
 
-    private static func spoken(_ column: MorningColumn, label: String) -> String {
+    private static func spoken(_ column: MorningColumn, label: String, kind: RoutineKind) -> String {
         guard column.hasAnything else { return "\(label), nothing logged" }
         var parts = [label]
-        if let wake = column.wake { parts.append("woke \(clockText(wake))") }
-        if let lag = column.lag { parts.append("\(lag) minutes to start") }
+        if let wake = column.wake { parts.append("\(kind == .night ? "started" : "woke") \(clockText(wake))") }
+        if kind == .morning, let lag = column.lag { parts.append("\(lag) minutes to start") }
         if let routine = column.routineMinutes { parts.append("routine \(routine) minutes") }
         return parts.joined(separator: ", ")
     }
@@ -402,12 +406,15 @@ private struct HorizontalPan: UIGestureRecognizerRepresentable {
 
 struct MorningColumnsLegend: View {
     let tint: Color
+    var kind: RoutineKind = .morning
 
     var body: some View {
         HStack(spacing: 12) {
             item("Goal") { HorizontalLine().stroke(MorningColumnInk.goal, style: StrokeStyle(lineWidth: 1.5, dash: [3, 2])).frame(width: 14, height: 2) }
-            item("Woke") { Rectangle().fill(Color.primary).frame(width: 12, height: 2) }
-            item("Until start") { Rectangle().fill(MorningColumnInk.lag).frame(width: 2, height: 12) }
+            item(kind == .night ? "Started" : "Woke") { Rectangle().fill(Color.primary).frame(width: 12, height: 2) }
+            if kind == .morning {
+                item("Until start") { Rectangle().fill(MorningColumnInk.lag).frame(width: 2, height: 12) }
+            }
             item("Routine") { Rectangle().fill(tint).frame(width: 10, height: 12) }
         }
         .accessibilityHidden(true)

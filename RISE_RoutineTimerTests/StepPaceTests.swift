@@ -109,4 +109,28 @@ final class GlyphCatalogTests: XCTestCase {
             XCTAssertEqual(RoutineStep.normalizedIcon(glyph.value), glyph.value, "\(glyph.value) is altered by normalizedIcon")
         }
     }
+
+    /// The starter routines are seeded straight into steps, past the
+    /// picker, so their icons have to be single graphemes too.
+    func testStarterRoutineIconsAreSingleGlyphs() {
+        for kind in RoutineKind.allCases {
+            for seed in RoutineStep.starterRoutine(for: kind) {
+                XCTAssertEqual(RoutineStep.normalizedIcon(seed.icon), seed.icon, "\(seed.title) (\(kind)) has a multi-glyph icon")
+                XCTAssertGreaterThanOrEqual(seed.durationSeconds, RoutineStep.minimumDurationSeconds)
+            }
+        }
+        XCTAssertFalse(RoutineStep.starterRoutine(for: .night).isEmpty)
+    }
+
+    /// The stored raw values are what every step and session is stamped
+    /// with; a step written before the night routine existed carries none
+    /// and has to read back as a morning one.
+    func testRoutineKindsRoundTripAndDefaultToMorning() {
+        for kind in RoutineKind.allCases {
+            XCTAssertEqual(RoutineKind(rawValue: kind.rawValue), kind)
+        }
+        XCTAssertEqual(RoutineKind(rawValue: "morning"), .morning)
+        XCTAssertEqual(RoutineKind(rawValue: "night"), .night)
+        XCTAssertNil(RoutineKind(rawValue: "afternoon"))
+    }
 }

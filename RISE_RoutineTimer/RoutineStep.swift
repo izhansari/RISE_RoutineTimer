@@ -35,7 +35,19 @@ final class RoutineStep {
     var autoShowNotes: Bool = true
 
     // SwiftData does not preserve List order automatically, so we save it.
+    // Order is kept within a routine: the morning and the night each count
+    // from zero.
     var sortOrder: Int
+
+    // Which routine this step belongs to (`RoutineKind.rawValue`). Stored as
+    // its raw string so the default keeps every step written before the
+    // night routine existed in the morning one.
+    var kindRaw: String = RoutineKind.morning.rawValue
+
+    var kind: RoutineKind {
+        get { RoutineKind(rawValue: kindRaw) ?? .morning }
+        set { kindRaw = newValue.rawValue }
+    }
 
     init(
         stepID: UUID = UUID(),
@@ -45,7 +57,8 @@ final class RoutineStep {
         autoNext: Bool = true,
         notes: String = "",
         autoShowNotes: Bool = true,
-        sortOrder: Int
+        sortOrder: Int,
+        kind: RoutineKind = .morning
     ) {
         self.stepID = stepID
         self.title = title
@@ -55,6 +68,14 @@ final class RoutineStep {
         self.notes = notes
         self.autoShowNotes = autoShowNotes
         self.sortOrder = sortOrder
+        self.kindRaw = kind.rawValue
+    }
+}
+
+extension Sequence where Element == RoutineStep {
+    /// The steps of one routine, in their saved order.
+    func routine(_ kind: RoutineKind) -> [RoutineStep] {
+        filter { $0.kind == kind }.sorted { $0.sortOrder < $1.sortOrder }
     }
 }
 
@@ -84,6 +105,33 @@ extension RoutineStep {
         RoutineStepSeed(title: "Coffee", icon: "☕", durationSeconds: 720, autoNext: false, notes: ""),
         RoutineStepSeed(title: "Tongue scraper", icon: "👅", durationSeconds: 60, autoNext: false, notes: "")
     ]
+
+    /// Seeded once, when the night routine first exists (see
+    /// `ContentView.seedNightRoutineIfNeeded()`). Unlike the morning
+    /// starter, a bump here only fires for a device that has *never* had
+    /// night steps — the night routine is the owner's sketch, and a reload
+    /// must not overwrite it.
+    static let nightStarterRoutineVersion = 1
+
+    /// A first draft of a night routine, meant to be edited into shape
+    /// rather than followed. Every step is manual: nothing at night should
+    /// tick over on its own the way the shower does.
+    static let nightStarterRoutine: [RoutineStepSeed] = [
+        RoutineStepSeed(title: "Tidy up", icon: "🧹", durationSeconds: 300, autoNext: false, notes: ""),
+        RoutineStepSeed(title: "Tomorrow's clothes", icon: "👔", durationSeconds: 180, autoNext: false, notes: ""),
+        RoutineStepSeed(title: "Brush / floss", icon: "🪥", durationSeconds: 240, autoNext: false, notes: ""),
+        RoutineStepSeed(title: "Wudu", icon: "💧", durationSeconds: 180, autoNext: false, notes: ""),
+        RoutineStepSeed(title: "Isha", icon: "🙏", durationSeconds: 600, autoNext: false, notes: ""),
+        RoutineStepSeed(title: "Read", icon: "📖", durationSeconds: 900, autoNext: false, notes: ""),
+        RoutineStepSeed(title: "Phone away / lights out", icon: "🌙", durationSeconds: 120, autoNext: false, notes: "")
+    ]
+
+    static func starterRoutine(for kind: RoutineKind) -> [RoutineStepSeed] {
+        switch kind {
+        case .morning: return starterRoutine
+        case .night: return nightStarterRoutine
+        }
+    }
 }
 
 // A lightweight seed type keeps the default routine separate from SwiftData.

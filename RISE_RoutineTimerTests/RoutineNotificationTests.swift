@@ -26,7 +26,71 @@ final class RoutineNotificationTests: XCTestCase {
 
     override func tearDown() async throws {
         RoutineNotificationManager.cancelRunAlerts()
+        RoutineNotificationManager.scheduleNightReminder(atMinutesAfterMidnight: nil)
         await RoutineNotificationManager.settle()
+    }
+
+    /// With nothing saved — the owner's phone, which had never touched the
+    /// switch — the reminder is on, at the stored goal. Switched off, it is
+    /// removed.
+    func testNightReminderIsOnUnlessSwitchedOff() async throws {
+        let suite = "rise-night-reminder-test"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        defaults.set(23 * 60, forKey: NightSettings.targetStartKey)
+
+        XCTAssertTrue(NightSettings.storedReminderEnabled(in: defaults))
+        RoutineNotificationManager.syncNightReminder(defaults: defaults)
+        await RoutineNotificationManager.settle()
+        var pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
+            .first { $0.identifier == RoutineNotificationManager.nightReminderIdentifier }
+        XCTAssertEqual((pending?.trigger as? UNCalendarNotificationTrigger)?.dateComponents.hour, 23)
+
+        defaults.set(false, forKey: NightSettings.reminderKey)
+        RoutineNotificationManager.syncNightReminder(defaults: defaults)
+        await RoutineNotificationManager.settle()
+        pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
+            .first { $0.identifier == RoutineNotificationManager.nightReminderIdentifier }
+        XCTAssertNil(pending)
+        defaults.removePersistentDomain(forName: suite)
+    }
+
+    /// Reminders show while the app is open; step alerts, which the app
+    /// already chimes, do not.
+    func testOnlyRemindersShowInTheForeground() {
+        XCTAssertTrue(NotificationPresenter.shownInForeground.contains(RoutineNotificationManager.nightReminderIdentifier))
+        XCTAssertTrue(NotificationPresenter.shownInForeground.contains(RoutineNotificationManager.reminderIdentifier))
+        XCTAssertFalse(NotificationPresenter.shownInForeground.contains("rise-run-abc-step-0"))
+    }
+
+    /// The night reminder is one repeating calendar request at the goal,
+    /// replaced when the goal moves and gone when it is switched off.
+    func testNightReminderIsOneRepeatingRequestAtTheGoal() async {
+        func pending() async -> UNNotificationRequest? {
+            await UNUserNotificationCenter.current().pendingNotificationRequests()
+                .first { $0.identifier == RoutineNotificationManager.nightReminderIdentifier }
+        }
+
+        RoutineNotificationManager.scheduleNightReminder(atMinutesAfterMidnight: 22 * 60 + 15)
+        await RoutineNotificationManager.settle()
+        let request = await pending()
+        let trigger = request?.trigger as? UNCalendarNotificationTrigger
+        XCTAssertEqual(trigger?.dateComponents.hour, 22)
+        XCTAssertEqual(trigger?.dateComponents.minute, 15)
+        XCTAssertEqual(trigger?.repeats, true)
+
+        RoutineNotificationManager.scheduleNightReminder(atMinutesAfterMidnight: 21 * 60)
+        await RoutineNotificationManager.settle()
+        let moved = await pending()
+        XCTAssertEqual((moved?.trigger as? UNCalendarNotificationTrigger)?.dateComponents.hour, 21)
+        let all = await UNUserNotificationCenter.current().pendingNotificationRequests()
+            .filter { $0.identifier == RoutineNotificationManager.nightReminderIdentifier }
+        XCTAssertEqual(all.count, 1, "moving the goal replaces the request rather than adding one")
+
+        RoutineNotificationManager.scheduleNightReminder(atMinutesAfterMidnight: nil)
+        await RoutineNotificationManager.settle()
+        let off = await pending()
+        XCTAssertNil(off)
     }
 
     /// A chain of auto steps is scheduled whole, so when the next step starts

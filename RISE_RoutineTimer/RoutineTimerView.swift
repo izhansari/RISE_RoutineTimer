@@ -16,10 +16,25 @@ struct RoutineTimerView: View {
     @Environment(AppNavigation.self) private var navigation
     @AppStorage(TargetSchedule.targetKey) private var targetMinutes = TargetSchedule.none
     @AppStorage(FillTheme.storageKey) private var fillThemeRaw = FillTheme.default.rawValue
+    /// Which routine the idle screen shows: MORNING or NIGHT, switched in
+    /// the header. A run in progress is whatever kind it was started as,
+    /// and the switch follows it (see `onChange(of: engine.hasActiveRun)`).
+    @AppStorage(RoutineKind.selectionKey) private var selectedKindRaw = RoutineKind.morning.rawValue
 
-    let steps: [RoutineStep]
+    /// Every saved step, both routines.
+    let allSteps: [RoutineStep]
 
     @Query(sort: \RoutineSession.startedAt, order: .reverse) private var sessions: [RoutineSession]
+
+    private var kind: RoutineKind { RoutineKind(rawValue: selectedKindRaw) ?? .morning }
+
+    /// The selected routine's steps, in order. Everything below that edits,
+    /// reorders or starts "the routine" means these.
+    private var steps: [RoutineStep] { allSteps.routine(kind) }
+
+    /// This routine's past runs, for the stats, the streak and the context
+    /// line. Never the other routine's: a night run is not a slow morning.
+    private var results: [SessionResult] { sessions.results(of: kind) }
 
     /// The notes sheet is presented by *item*, with "open straight into
     /// editing" carried inside it. It was a Bool `isPresented` plus a separate
@@ -55,35 +70,55 @@ struct RoutineTimerView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if steps.isEmpty && engine.run == nil {
-                    ContentUnavailableView {
-                        Label("No Routine Steps", systemImage: "list.bullet")
-                    } description: {
-                        Text("Add a step to build your routine.")
-                    } actions: {
-                        Button("Add Step") { insertStep(after: -1) }
-                    }
-                } else if engine.hasActiveRun {
+                if engine.hasActiveRun {
                     // Paused included: a pause dims the timer in place rather
                     // than dropping back here, which read as "routine over".
                     activeRoutineScreen
                 } else {
+                    // An empty routine is drawn by the idle screen too (a
+                    // note where the rows would be, plus ADD STEP), so the
+                    // MORNING / NIGHT switch is always there to get out by.
                     idleScreen
                 }
             }
-            .navigationTitle("Morning Routine")
+            .navigationTitle(kind.title)
             .toolbar(engine.hasActiveRun ? .hidden : .visible, for: .navigationBar)
             // While a reorder is pending the tab bar goes too: the only ways
             // out of the proposal are Cancel and Save Order.
-            .toolbar(engine.hasActiveRun || hasPendingOrder ? .hidden : .visible, for: .tabBar)
             .toolbar {
+                // The way back to Today. Hidden while a run is live (the
+                // timer has its own chrome) and while a reorder waits on
+                // Cancel / Save Order, which are the only ways out of it.
+                if !engine.hasActiveRun && !hasPendingOrder {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            navigation.showsRoutine = false
+                        } label: {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 15, weight: .semibold))
+                        }
+                        .accessibilityLabel("Back to Today")
+                    }
+                }
                 if streak >= 2 {
                     ToolbarItem(placement: .topBarTrailing) { streakBadge }
                 }
             }
             .sheet(item: $statsRequest) { request in
-                StepStatsSheet(step: request.step, stats: RoutineStats(sessions: sessions.map(\.result)))
+                StepStatsSheet(step: request.step, stats: RoutineStats(sessions: results))
             }
+        }
+        .task {
+            // A run restored at launch decides which routine is showing.
+            if engine.hasActiveRun, let running = engine.kind { selectedKindRaw = running.rawValue }
+        }
+        .onChange(of: kind) { _, _ in
+            // Switching routines drops any half-made edit on the old one,
+            // and a finished run of the other routine has nothing left to
+            // say on this one's screen.
+            selectedStepID = nil
+            pendingOrder = nil
+            if engine.isComplete { engine.reset() }
         }
         .onChange(of: engine.isComplete) { wasComplete, isComplete in
             if isComplete, !wasComplete, let run = engine.run {
@@ -94,7 +129,8 @@ struct RoutineTimerView: View {
                     activeSeconds: engine.activeElapsedSeconds,
                     pausedSeconds: engine.pausedSeconds,
                     completed: true,
-                    steps: run.results
+                    steps: run.results,
+                    kind: run.kind
                 )
             }
         }
@@ -116,6 +152,9 @@ struct RoutineTimerView: View {
             // so the first step's notes have to be triggered from here.
             if active {
                 selectedStepID = nil
+                // The Start intents can start either routine; the idle
+                // screen behind the timer should be the one that ran.
+                if let running = engine.kind { selectedKindRaw = running.rawValue }
                 autoShowNotesIfWanted()
             } else {
                 lastAutoNotesIndex = nil
@@ -241,6 +280,18 @@ struct RoutineTimerView: View {
                 }
                 .onMove(perform: moveSteps)
 
+                if rows.isEmpty {
+                    Text(kind == .night
+                         ? "Nothing here yet. Sketch out your night — add a step for each thing you want to get done before bed."
+                         : "Nothing here yet. Add a step for each thing you do in the morning.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 8)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 24, bottom: 0, trailing: 24))
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                }
+
                 if editable {
                     Button { insertStep(after: rows.count - 1) } label: {
                         HStack(spacing: 11) {
@@ -286,6 +337,8 @@ struct RoutineTimerView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
                     .buttonStyle(.plain)
+                    .disabled(rows.isEmpty)
+                    .opacity(rows.isEmpty ? 0.35 : 1)
                     .padding(.horizontal, 24)
                     .padding(.top, 4)
                 }
@@ -308,9 +361,16 @@ struct RoutineTimerView: View {
     /// underneath instead.
     private var idleHeader: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // Which routine. Not offered while a paused run is showing its
+            // frozen steps — that list belongs to the run, not to a choice.
+            if isShowingSavedRoutine {
+                RoutineKindSwitch(selected: $selectedKindRaw)
+                    .padding(.top, 14)
+            }
+
             Text(idleHeadlineTime)
                 .font(analogFont(30))
-                .padding(.top, 20)
+                .padding(.top, isShowingSavedRoutine ? 14 : 20)
             .padding(.bottom, (idleSummaryLine ?? readyContextLine) == nil ? 20 : 6)
 
             if let line = idleSummaryLine ?? readyContextLine {
@@ -404,7 +464,7 @@ struct RoutineTimerView: View {
         let displayed = orderedSteps
         let anchorID: UUID? = displayed.indices.contains(index) ? displayed[index].stepID : nil
 
-        let step = RoutineStep(title: "New Step", durationSeconds: 5 * 60, autoNext: true, notes: "", sortOrder: 0)
+        let step = RoutineStep(title: "New Step", durationSeconds: 5 * 60, autoNext: true, notes: "", sortOrder: 0, kind: kind)
         modelContext.insert(step)
 
         var saved = steps
@@ -458,7 +518,11 @@ struct RoutineTimerView: View {
         return nil
     }
 
-    private var schedule: TargetSchedule { TargetSchedule(targetMinutesAfterMidnight: targetMinutes) }
+    /// The finish-by target is the morning's ("out the door by 7:30"). A
+    /// night run is held to no target, so its screen never says WON'T MAKE.
+    private func schedule(for kind: RoutineKind) -> TargetSchedule {
+        TargetSchedule(targetMinutesAfterMidnight: kind == .morning ? targetMinutes : TargetSchedule.none)
+    }
 
     private var fillTheme: FillTheme { FillTheme(rawValue: fillThemeRaw) ?? .default }
 
@@ -467,6 +531,7 @@ struct RoutineTimerView: View {
         guard engine.run == nil else { return nil }
         var parts: [String] = []
         let planned = steps.reduce(0) { $0 + $1.durationSeconds }
+        let schedule = schedule(for: kind)
         if let startBy = schedule.startByDate(on: engine.now, plannedSeconds: planned),
            let target = schedule.targetDate(on: engine.now) {
             if engine.now <= startBy {
@@ -475,7 +540,7 @@ struct RoutineTimerView: View {
                 parts.append("Past start time for \(TimeFormatting.shortClockTime(from: target))")
             }
         }
-        let stats = RoutineStats(sessions: sessions.map(\.result))
+        let stats = RoutineStats(sessions: results)
         guard let latest = stats.latest else { return parts.isEmpty ? nil : parts.joined(separator: " · ") }
         parts.append("Last \(TimeFormatting.clockTime(from: latest.activeSeconds))")
         if !schedule.isSet, let average = stats.averageStartSecondsSinceMidnight, stats.count >= 2 {
@@ -488,7 +553,7 @@ struct RoutineTimerView: View {
     // MARK: - Streak
 
     private var streak: Int {
-        RoutineStats(sessions: sessions.map(\.result)).currentStreak()
+        RoutineStats(sessions: results).currentStreak()
     }
 
     /// The streak's own place: top right, where the eye lands on the Run tab,
@@ -496,23 +561,10 @@ struct RoutineTimerView: View {
     /// the context line under the planned time, wrapping onto a second line.
     private var streakBadge: some View {
         Button {
-            navigation.openHistory()
+            navigation.openHistory(kind: kind)
         } label: {
-            HStack(alignment: .center, spacing: 6) {
-                Text("\(streak)")
-                    .font(analogFont(18))
-                    .monospacedDigit()
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("DAY")
-                    Text("STREAK")
-                }
-                .font(.system(size: 7.5, weight: .semibold))
-                .tracking(1.2)
-            }
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 4)
+            StreakBadge(days: streak)
         }
-        .accessibilityLabel("\(streak) day streak")
         .accessibilityHint("Opens History")
     }
 
@@ -532,7 +584,7 @@ struct RoutineTimerView: View {
             engine.resume()
         } else {
             if engine.isComplete { engine.reset() }
-            engine.start(steps: steps.map(RunStep.init))
+            engine.start(steps: steps.map(RunStep.init), kind: kind)
         }
     }
 
@@ -541,7 +593,7 @@ struct RoutineTimerView: View {
     private var activeRoutineScreen: some View {
         ActiveRoutineView(
             engine: engine,
-            schedule: schedule,
+            schedule: schedule(for: engine.kind ?? kind),
             theme: fillTheme,
             onShowNotes: { editing in
                 notesRequest = NotesRequest(editing: editing)
@@ -573,7 +625,7 @@ struct RoutineTimerView: View {
     /// from the routine while the run was in progress.
     private var currentModelStep: RoutineStep? {
         guard let id = engine.currentStep?.id else { return nil }
-        return steps.first { $0.stepID == id }
+        return allSteps.first { $0.stepID == id }
     }
 
     /// Opens the notes sheet as a step begins, when that step asks for it.

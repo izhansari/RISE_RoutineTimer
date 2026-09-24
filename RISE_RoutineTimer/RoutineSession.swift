@@ -18,8 +18,18 @@ final class RoutineSession {
     var pausedSeconds: Int = 0
     var completed: Bool = true
     var stepRecords: [StepResult] = []
+    /// Which routine this was a run of (`RoutineKind.rawValue`). The default
+    /// keeps every session saved before the night routine existed a morning.
+    var kindRaw: String = RoutineKind.morning.rawValue
 
-    init(result: SessionResult) {
+    var kind: RoutineKind { RoutineKind(rawValue: kindRaw) ?? .morning }
+    /// For a night run, the start goal it was held to (minutes after
+    /// midnight), recorded when the session was saved — see
+    /// `MorningRecord.joinNights`. Nil for a morning, whose goal lives on
+    /// its `MorningLog`, and for nights saved before goals were stored.
+    var goalMinutes: Int?
+
+    init(result: SessionResult, goalMinutes: Int? = nil) {
         startedAt = result.startedAt
         endedAt = result.endedAt
         plannedSeconds = result.plannedSeconds
@@ -27,6 +37,8 @@ final class RoutineSession {
         pausedSeconds = result.pausedSeconds
         completed = result.completed
         stepRecords = result.steps
+        kindRaw = result.kind.rawValue
+        self.goalMinutes = goalMinutes
     }
 
     /// Writes a corrected copy of this run back (see `SessionResult.correcting`).
@@ -48,8 +60,18 @@ final class RoutineSession {
             activeSeconds: activeSeconds,
             pausedSeconds: pausedSeconds,
             completed: completed,
-            steps: stepRecords
+            steps: stepRecords,
+            kind: kind
         )
+    }
+}
+
+extension Array where Element == RoutineSession {
+    /// The saved runs of one routine, as results. Everything that averages,
+    /// ranks or streaks over sessions asks for one routine at a time — a
+    /// night run is not a slow morning.
+    func results(of kind: RoutineKind) -> [SessionResult] {
+        filter { $0.kind == kind }.map(\.result)
     }
 }
 
@@ -57,14 +79,19 @@ final class RoutineSession {
 /// was completed, so a mis-tapped Start doesn't clutter history.
 final class SessionRecorder {
     private let context: ModelContext
+    /// The night's start goal at the moment a night run is saved, stamped
+    /// on the session so a later change of goal leaves it alone.
+    private let nightGoal: () -> Int
 
-    init(context: ModelContext) {
+    init(context: ModelContext, nightGoal: @escaping () -> Int = { NightSettings.storedTargetStart() }) {
         self.context = context
+        self.nightGoal = nightGoal
     }
 
     func record(_ result: SessionResult) {
         guard result.completed || !result.steps.isEmpty else { return }
-        context.insert(RoutineSession(result: result))
+        let goal = result.kind == .night ? nightGoal() : nil
+        context.insert(RoutineSession(result: result, goalMinutes: goal))
         do {
             try context.save()
         } catch {

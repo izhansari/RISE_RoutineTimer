@@ -18,8 +18,15 @@ import SwiftData
 @MainActor
 enum DebugSeed {
     /// Wipes any existing sample data and writes a fresh 13-day run-up.
-    static func populate(context: ModelContext, steps: [RoutineStep], settings: MorningSettings) {
+    static func populate(
+        context: ModelContext,
+        steps: [RoutineStep],
+        settings: MorningSettings,
+        nightSteps: [RoutineStep] = [],
+        nightGoalMinutes: Int = NightSettings.defaultTargetStartMinutes
+    ) {
         clear(context: context)
+        seedNights(context: context, steps: nightSteps, goalMinutes: nightGoalMinutes)
 
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
@@ -57,6 +64,43 @@ enum DebugSeed {
         }
 
         save(context)
+    }
+
+    /// Thirteen nights to match the mornings, two missed, starting later than
+    /// the goal at first and tightening up — a few of them past midnight, so
+    /// the day-turns-at-noon rule and the across-midnight snooze can be seen.
+    private static func seedNights(context: ModelContext, steps: [RoutineStep], goalMinutes: Int) {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let missedNightIndices: Set<Int> = [2, 9]
+        let planned = steps.reduce(0) { $0 + $1.durationSeconds }
+
+        for daysAgo in stride(from: 13, through: 1, by: -1) {
+            let nightIndex = 13 - daysAgo
+            if missedNightIndices.contains(nightIndex) { continue }
+            guard let night = calendar.date(byAdding: .day, value: -daysAgo, to: today) else { continue }
+
+            let progress = Double(nightIndex) / 12
+            let jitter = { (spread: Double) in Double.random(in: -spread / 2...spread / 2) }
+            let lateMinutes = max(-10, (95 - progress * 80 + jitter(25)).rounded())
+            let durationMinutes = max(15, (45 - progress * 10 + jitter(8)).rounded())
+
+            let start = night
+                .addingTimeInterval(TimeInterval(goalMinutes * 60))
+                .addingTimeInterval(lateMinutes * 60)
+            let end = start.addingTimeInterval(durationMinutes * 60)
+
+            context.insert(RoutineSession(result: SessionResult(
+                startedAt: start,
+                endedAt: end,
+                plannedSeconds: planned,
+                activeSeconds: Int(durationMinutes * 60),
+                pausedSeconds: 0,
+                completed: true,
+                steps: stepResults(for: steps, totalSeconds: Int(durationMinutes * 60)),
+                kind: .night
+            ), goalMinutes: goalMinutes))
+        }
     }
 
     static func clear(context: ModelContext) {

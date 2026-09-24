@@ -114,6 +114,11 @@ struct ActiveRoutineView: View {
     private var pace: StepPace { StepPace(overtimeSeconds: engine.overtimeSeconds) }
     private var hasNotes: Bool { engine.currentStep?.hasNotes == true }
 
+    /// The night routine runs on a black page with white type; the fill
+    /// still rises in the theme colour. Everything drawn on the page reads
+    /// off `textColor`, so only the chips' ghost discs need to know.
+    private var isDarkPage: Bool { engine.kind == .night }
+
     /// Overtime already means "this step is waiting on you", so there is
     /// nothing left to toggle — see `RoutineEngine.toggleAutoNextForCurrentStep`.
     private var canToggleAutoNext: Bool {
@@ -128,9 +133,11 @@ struct ActiveRoutineView: View {
                 ZStack {
                     InvertingFillView(
                         fillColor: pace.fillColor(theme: theme),
-                        fillFraction: engine.currentStepFillProgress
-                    ) { textColor in
-                        content(textColor: textColor, insets: insets)
+                        fillFraction: engine.currentStepFillProgress,
+                        pageColor: isDarkPage ? .black : .white,
+                        pageTextColor: isDarkPage ? .white : .black
+                    ) { textColor, onFill in
+                        content(textColor: textColor, onFill: onFill, insets: insets)
                     }
 
                     controls(insets: insets)
@@ -226,7 +233,7 @@ struct ActiveRoutineView: View {
         .receiptDialog(
             isPresented: $confirmingEnd,
             title: "End routine?",
-            message: "This morning will be saved as ended early, and you'll start from the first step next time.",
+            message: "This run will be saved as ended early, and you'll start from the first step next time.",
             confirmTitle: "End routine",
             cancelTitle: "Keep going",
             onConfirm: onEnd
@@ -245,7 +252,7 @@ struct ActiveRoutineView: View {
 
     // MARK: - Type (inside the fill — no controls here)
 
-    private func content(textColor: Color, insets: EdgeInsets) -> some View {
+    private func content(textColor: Color, onFill: Bool, insets: EdgeInsets) -> some View {
         VStack(spacing: 0) {
             if showStepTimes {
                 Text(stepTimeRangeText)
@@ -266,7 +273,7 @@ struct ActiveRoutineView: View {
             // white — instead of flipping them whole. Their hit targets live
             // in `controls`, in the same slot, because anything interactive
             // in this closure would exist twice.
-            chipRow(textColor: textColor)
+            chipRow(textColor: textColor, onFill: onFill)
                 .frame(height: buttonSlotHeight)
 
             if showNextStep {
@@ -430,15 +437,15 @@ struct ActiveRoutineView: View {
     /// The check and skip chips, painted for one layer of the inverting
     /// fill: `textColor` is black on the page and white inside the fill, so
     /// the glyph, ring and ghost fill follow it and the mask does the rest.
-    private func chipRow(textColor: Color) -> some View {
+    private func chipRow(textColor: Color, onFill: Bool) -> some View {
         HStack(spacing: 20) {
             Color.clear.frame(width: 46, height: 46)
             // Pressed in while a finger is on it. It snaps rather than eases
             // — nothing inside the fill animates — which suits a control
             // that answers with a click.
-            chip("checkmark", diameter: checkDiameter, weight: .light, textColor: textColor)
+            chip("checkmark", diameter: checkDiameter, weight: .light, textColor: textColor, onFill: onFill)
                 .scaleEffect(checkPressed ? 0.93 : 1)
-            chip("forward.end", diameter: 46, weight: .regular, textColor: textColor)
+            chip("forward.end", diameter: 46, weight: .regular, textColor: textColor, onFill: onFill)
         }
     }
 
@@ -446,10 +453,8 @@ struct ActiveRoutineView: View {
     /// same dashed border — the `AUTO` / `MANUAL` capsule under the step name
     /// already says which kind of step this is, and having the border say it
     /// again in a second visual language was a code to learn for nothing.
-    private func chip(_ systemName: String, diameter: CGFloat, weight: Font.Weight, textColor: Color) -> some View {
-        let onFill = textColor == .white
-
-        return Image(systemName: systemName)
+    private func chip(_ systemName: String, diameter: CGFloat, weight: Font.Weight, textColor: Color, onFill: Bool) -> some View {
+        Image(systemName: systemName)
             .font(.system(size: diameter * 0.34, weight: weight))
             .foregroundStyle(textColor.opacity(onFill ? 0.92 : 0.6))
             .frame(width: diameter, height: diameter)
@@ -460,14 +465,16 @@ struct ActiveRoutineView: View {
                     style: StrokeStyle(lineWidth: 2, dash: [4, 5])
                 )
             }
-            .shadow(color: .black.opacity(onFill ? 0 : 0.1), radius: 10, y: 3)
+            .shadow(color: .black.opacity(onFill || isDarkPage ? 0 : 0.1), radius: 10, y: 3)
     }
 
     /// On the page the chip is a soft white disc — solid read as stark
     /// against the saturated fill. Under the fill it is a ghost: a whisper of
-    /// white, the same way the type below the line turns white.
+    /// white, the same way the type below the line turns white. On the
+    /// night's black page the disc is a ghost too — a 72% white disc under a
+    /// white glyph would swallow it.
     private func chipFill(onFill: Bool) -> Color {
-        Color.white.opacity(onFill ? 0.16 : 0.72)
+        Color.white.opacity(onFill ? 0.16 : (isDarkPage ? 0.12 : 0.72))
     }
 
     // MARK: - Bottom bar

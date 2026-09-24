@@ -441,7 +441,9 @@ struct SessionSummaryView: View {
     // MARK: - Comparison
 
     private var comparison: String? {
-        let stats = RoutineStats(sessions: sessions.map(\.result))
+        // Against runs of the same routine: a night run's "new best" is
+        // measured against other nights.
+        let stats = RoutineStats(sessions: sessions.results(of: result.kind))
         guard stats.count >= 2 else {
             return "First one in the books. Averages start next time."
         }

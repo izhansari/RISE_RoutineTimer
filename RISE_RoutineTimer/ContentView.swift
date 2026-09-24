@@ -2,8 +2,8 @@
 //  ContentView.swift
 //  RISE_RoutineTimer
 //
-//  The root screen owns the saved routine query and shows the four tabs:
-//  Today, Run, History and Settings.
+//  The root screen owns the saved routine query and shows Today, with the
+//  routine screen full-screen over it when asked for. There is no tab bar.
 //
 
 import SwiftData
@@ -11,35 +11,28 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
+    /// Every step of both routines. The Run tab shows one routine at a time
+    /// (`steps.routine(_:)`); Today, History and the morning goal only ever
+    /// mean the morning one.
     @Query(sort: \RoutineStep.sortOrder, order: .forward) private var steps: [RoutineStep]
     @AppStorage("seededRoutineVersion") private var seededRoutineVersion = 0
+    @AppStorage("seededNightRoutineVersion") private var seededNightRoutineVersion = 0
 
-    /// Today is the landing screen: the morning starts before the routine
-    /// does. The selection lives in `AppNavigation` so an App Intent that
-    /// starts the routine can land the app on the Run tab.
+    /// Today is the only home screen. Whether the routine screen is up lives
+    /// in `AppNavigation`, so an App Intent that starts a routine can open it.
     @Environment(AppNavigation.self) private var navigation
-
-    private typealias Tab = AppNavigation.Tab
 
     var body: some View {
         @Bindable var navigation = navigation
 
-        TabView(selection: $navigation.selectedTab) {
-            TodayView(steps: steps, onStartRoutine: { navigation.selectedTab = .run })
-                .tabItem {
-                    Label("Today", systemImage: "sun.max")
-                }
-                .tag(Tab.today)
-
-            RoutineTimerView(steps: steps)
-                .tabItem {
-                    Label("Run", systemImage: "timer")
-                }
-                .tag(Tab.run)
-
+        // No tab bar: Today is home, and the routine screen opens over it.
+        TodayView(allSteps: steps, onStartRoutine: { navigation.showsRoutine = true })
+        .fullScreenCover(isPresented: $navigation.showsRoutine) {
+            RoutineTimerView(allSteps: steps)
         }
         .task {
             seedStarterRoutineIfNeeded()
+            seedNightRoutineIfNeeded()
             repairDuplicateStepIDs()
             backfillWakeGoals()
             // Asking here means the prompt shows over the idle screen, never over a running timer.
@@ -61,22 +54,42 @@ struct ContentView: View {
         seededRoutineVersion = RoutineStep.starterRoutineVersion
 
         let existing = (try? modelContext.fetch(FetchDescriptor<RoutineStep>())) ?? []
-        for step in existing {
+        // Only the morning: a reload of the owner's morning routine must not
+        // take the night sketch with it.
+        for step in existing.routine(.morning) {
             modelContext.delete(step)
         }
 
-        for (index, seed) in RoutineStep.starterRoutine.enumerated() {
+        insertStarter(.morning)
+        saveChanges()
+    }
+
+    /// Lays down a first draft of the night routine, once, on a device that
+    /// has never had night steps. It is a sketch to edit, so unlike the
+    /// morning starter it is never re-seeded over the top of what is there.
+    private func seedNightRoutineIfNeeded() {
+        guard seededNightRoutineVersion < RoutineStep.nightStarterRoutineVersion else { return }
+        seededNightRoutineVersion = RoutineStep.nightStarterRoutineVersion
+
+        let existing = (try? modelContext.fetch(FetchDescriptor<RoutineStep>())) ?? []
+        guard existing.routine(.night).isEmpty else { return }
+
+        insertStarter(.night)
+        saveChanges()
+    }
+
+    private func insertStarter(_ kind: RoutineKind) {
+        for (index, seed) in RoutineStep.starterRoutine(for: kind).enumerated() {
             modelContext.insert(RoutineStep(
                 title: seed.title,
                 icon: seed.icon,
                 durationSeconds: seed.durationSeconds,
                 autoNext: seed.autoNext,
                 notes: seed.notes,
-                sortOrder: index
+                sortOrder: index,
+                kind: kind
             ))
         }
-
-        saveChanges()
     }
 
     /// Mornings logged before the goal was stored on them get the goal that

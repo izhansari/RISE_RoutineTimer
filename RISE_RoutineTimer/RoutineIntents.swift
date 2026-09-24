@@ -23,33 +23,55 @@ import SwiftData
 struct StartRoutineIntent: AppIntent {
     static let title: LocalizedStringResource = "Start Morning Routine"
     static let description = IntentDescription(
-        "Starts the routine timer and opens RISE on the Run tab. Does nothing if a routine is already running."
+        "Starts the morning routine timer and opens it in RISE. Does nothing if a routine is already running."
     )
     static let openAppWhenRun = true
 
     // The protocol requirement is nonisolated; the engine and store are not.
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        guard let engine = AppServices.engine, let container = AppServices.container else {
-            throw RoutineIntentError.appNotReady
-        }
-
-        if engine.hasActiveRun {
-            AppServices.navigation?.selectedTab = .run
-            return .result(dialog: "A routine is already running.")
-        }
-
-        let descriptor = FetchDescriptor<RoutineStep>(sortBy: [SortDescriptor(\.sortOrder)])
-        let steps = try container.mainContext.fetch(descriptor)
-        guard !steps.isEmpty else {
-            return .result(dialog: "Your routine has no steps yet.")
-        }
-
-        if engine.isComplete { engine.reset() }
-        engine.start(steps: steps.map(RunStep.init))
-        AppServices.navigation?.selectedTab = .run
-        return .result(dialog: "Routine started.")
+        try startRoutine(.morning)
     }
+}
+
+struct StartNightRoutineIntent: AppIntent {
+    static let title: LocalizedStringResource = "Start Night Routine"
+    static let description = IntentDescription(
+        "Starts the night routine timer and opens it in RISE. Does nothing if a routine is already running."
+    )
+    static let openAppWhenRun = true
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        try startRoutine(.night)
+    }
+}
+
+/// One start path for both routines, so the two intents cannot drift.
+@MainActor
+private func startRoutine(_ kind: RoutineKind) throws -> some IntentResult & ProvidesDialog {
+    guard let engine = AppServices.engine, let container = AppServices.container else {
+        throw RoutineIntentError.appNotReady
+    }
+
+    if engine.hasActiveRun {
+        AppServices.navigation?.showsRoutine = true
+        return .result(dialog: "A routine is already running.")
+    }
+
+    let descriptor = FetchDescriptor<RoutineStep>(sortBy: [SortDescriptor(\.sortOrder)])
+    let steps = try container.mainContext.fetch(descriptor).routine(kind)
+    guard !steps.isEmpty else {
+        return .result(dialog: "Your \(kind.noun) routine has no steps yet.")
+    }
+
+    if engine.isComplete { engine.reset() }
+    engine.start(steps: steps.map(RunStep.init), kind: kind)
+    // The Run tab shows whichever routine was last picked; point it at the
+    // one now running so the finished screen is about the right routine.
+    UserDefaults.standard.set(kind.rawValue, forKey: RoutineKind.selectionKey)
+    AppServices.navigation?.showsRoutine = true
+    return .result(dialog: "\(kind.title) started.")
 }
 
 // MARK: - I'm awake
@@ -117,7 +139,7 @@ struct OpenTodayIntent: AppIntent {
         guard let navigation = AppServices.navigation else {
             throw RoutineIntentError.appNotReady
         }
-        navigation.selectedTab = .today
+        navigation.showsRoutine = false
         return .result()
     }
 }
@@ -149,6 +171,14 @@ struct RISEShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Start Routine",
             systemImageName: "timer"
+        )
+        AppShortcut(
+            intent: StartNightRoutineIntent(),
+            phrases: [
+                "Start my night routine in \(.applicationName)",
+            ],
+            shortTitle: "Start Night Routine",
+            systemImageName: "moon"
         )
         AppShortcut(
             intent: MarkAwakeIntent(),

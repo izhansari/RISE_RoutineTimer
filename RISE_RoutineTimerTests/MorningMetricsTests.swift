@@ -270,6 +270,67 @@ final class MorningMetricsTests: XCTestCase {
         XCTAssertNotNil(settings.impliedWake(routineStart: at(0, 0, 30), existingWake: nil, calendar: calendar))
     }
 
+    // MARK: - The night, in the morning's shape
+
+    /// A night record's "wake" is the moment its routine began, and its
+    /// snooze is measured from the record's own day — so a night that
+    /// started at half past midnight is 150 minutes late against 10pm, not
+    /// 21 hours early against the next day's midnight.
+    func testANightPastMidnightIsLateNotEarly() {
+        let nightGoal = MorningSettings(targetWakeMinutes: 22 * 60)
+        let evening = day(0)
+        var night = MorningRecord(day: evening)
+        night.wakeAt = evening.addingTimeInterval(24.5 * 3600)      // 12:30am, the next calendar day
+        night.routineStartAt = night.wakeAt
+        night.routineEndAt = night.wakeAt?.addingTimeInterval(30 * 60)
+        night.goalMinutes = 22 * 60
+
+        XCTAssertEqual(night.snoozeMinutes(settings: nightGoal, calendar: calendar), 150)
+        XCTAssertEqual(night.activationMinutes, 0)
+        XCTAssertEqual(night.durationMinutes, 30)
+        XCTAssertEqual(night.wakeMinutesAfterMidnight(calendar: calendar), 1470, "into the night's day, not the clock's")
+        XCTAssertTrue(night.isComplete)
+
+        // A morning is unchanged by the day-relative rule.
+        let morning = record(0, wake: (6, 50), start: (7, 0), end: (7, 30))
+        XCTAssertEqual(morning.snoozeMinutes(settings: settings, calendar: calendar), 20)
+        XCTAssertEqual(morning.wakeMinutesAfterMidnight(calendar: calendar), 6 * 60 + 50)
+    }
+
+    /// The night has no activation, and says "nights", not "mornings".
+    func testNightMetricsSpeakOfNightsAndSkipActivation() {
+        var records: [MorningRecord] = []
+        for index in 0..<8 {
+            var night = MorningRecord(day: day(-index))
+            night.wakeAt = day(-index).addingTimeInterval(TimeInterval(22 * 3600 + 5 * 60))
+            night.routineStartAt = night.wakeAt
+            night.routineEndAt = night.wakeAt?.addingTimeInterval(30 * 60)
+            night.completedRoutine = true
+            night.goalMinutes = 22 * 60
+            records.append(night)
+        }
+        let metrics = MorningMetrics(records: records, settings: MorningSettings(targetWakeMinutes: 22 * 60), calendar: calendar, kind: .night)
+
+        XCTAssertEqual(metrics.metrics, [.snooze, .duration])
+        let lines = metrics.insights(now: day(0).addingTimeInterval(23 * 3600))
+        XCTAssertEqual(lines.first, "You've logged 8 nights total.")
+        XCTAssertFalse(lines.contains { $0.hasPrefix("Activation") }, "nothing to activate from at night")
+        XCTAssertTrue(lines.contains { $0.contains("spread in start time") }, "\(lines)")
+
+        let morning = MorningMetrics(records: records, settings: MorningSettings(targetWakeMinutes: 22 * 60), calendar: calendar)
+        XCTAssertEqual(morning.metrics, MorningMetrics.Metric.allCases)
+        XCTAssertEqual(morning.insights(now: day(0).addingTimeInterval(23 * 3600)).first, "You've logged 8 mornings total.")
+    }
+
+    /// The night routine says nothing about waking, however early it runs —
+    /// a night run at 12:30am is inside the morning window and must still
+    /// not become the day's wake time.
+    func testANightRunNeverImpliesAWake() {
+        XCTAssertNil(settings.impliedWake(routineStart: at(0, 6, 50), kind: .night, existingWake: nil, calendar: calendar))
+        XCTAssertNil(settings.impliedWake(routineStart: at(0, 0, 30), kind: .night, existingWake: nil, calendar: calendar))
+        XCTAssertNotNil(settings.impliedWake(routineStart: at(0, 6, 50), kind: .morning, existingWake: nil, calendar: calendar))
+    }
+
     /// The point of it: a morning started from the Run tab is a complete
     /// record, so it reaches the baselines instead of being dropped.
     func testAnImpliedWakeMakesTheMorningCount() {

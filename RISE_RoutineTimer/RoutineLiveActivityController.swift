@@ -29,10 +29,10 @@ final class RoutineLiveActivityController {
             return
         }
 
-        Task { await upsert(state) }
+        Task { await upsert(state, routineName: (engine.kind ?? .morning).title) }
     }
 
-    private func upsert(_ state: RoutineActivityAttributes.ContentState) async {
+    private func upsert(_ state: RoutineActivityAttributes.ContentState, routineName: String) async {
         // Adopt an activity left over from a previous launch rather than
         // stacking a second one on the Lock Screen.
         if activity == nil {
@@ -47,7 +47,7 @@ final class RoutineLiveActivityController {
 
         do {
             activity = try Activity.request(
-                attributes: RoutineActivityAttributes(routineName: "Morning Routine"),
+                attributes: RoutineActivityAttributes(routineName: routineName),
                 content: content,
                 pushType: nil
             )

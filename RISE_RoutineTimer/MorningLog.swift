@@ -66,7 +66,10 @@ extension MorningRecord {
             byDay[day] = record
         }
 
-        for session in sessions {
+        // Mornings only: a night run is not the morning routine started
+        // late, and must not become the day's routine start. Nights are
+        // joined by `joinNights` instead.
+        for session in sessions where session.kind == .morning {
             let day = calendar.startOfDay(for: session.startedAt)
             var record = byDay[day] ?? MorningRecord(day: day)
             if let existing = record.routineStartAt, existing <= session.startedAt {
@@ -83,9 +86,55 @@ extension MorningRecord {
     }
 }
 
-// MARK: - Store
+// MARK: - Nights
+
+extension MorningRecord {
+    /// The evening a night run belongs to. A night routine that begins at
+    /// half past midnight is still the night before, so the day turns over
+    /// at noon rather than at midnight.
+    nonisolated static func nightDay(of date: Date, calendar: Calendar = .current) -> Date {
+        calendar.startOfDay(for: date.addingTimeInterval(-12 * 60 * 60))
+    }
+
+    /// One record per night out of the night routine's sessions, in the
+    /// same shape the morning uses so the charts, baselines and insights
+    /// are shared. There is no wake to log at night — you are already up —
+    /// so the record's "wake" is the moment the routine began: its snooze
+    /// is how late that was against the night's start goal, its activation
+    /// is nought, and its box is the routine. The goal is the one stored on
+    /// the session when it was saved (`RoutineSession.goalMinutes`), for the
+    /// same reason the morning stores it: moving the goal must not rewrite
+    /// the nights already had.
+    static func joinNights(
+        sessions: [RoutineSession],
+        calendar: Calendar = .current
+    ) -> [MorningRecord] {
+        var byNight: [Date: MorningRecord] = [:]
+
+        for session in sessions where session.kind == .night {
+            let night = nightDay(of: session.startedAt, calendar: calendar)
+            // The first run of the evening is the night; a second one is a
+            // retake and does not move it.
+            if let existing = byNight[night]?.routineStartAt, existing <= session.startedAt {
+                continue
+            }
+            var record = MorningRecord(day: night)
+            record.wakeAt = session.startedAt
+            record.routineStartAt = session.startedAt
+            record.routineEndAt = session.endedAt
+            record.routineActiveSeconds = session.activeSeconds
+            record.completedRoutine = session.completed
+            record.goalMinutes = session.goalMinutes
+            byNight[night] = record
+        }
+
+        return byNight.values.sorted { $0.day > $1.day }
+    }
+}
 
 /// Reads and writes today's wake time. Mirrors `SessionRecorder`.
+// MARK: - Store
+
 @MainActor
 final class MorningLogStore {
     private let context: ModelContext
@@ -121,10 +170,10 @@ final class MorningLogStore {
     /// morning has none — see `MorningSettings.impliedWake`. Returns whether
     /// it wrote anything.
     @discardableResult
-    func recordWakeImplied(byRoutineStartingAt start: Date, settings: MorningSettings) -> Bool {
+    func recordWakeImplied(byRoutineStartingAt start: Date, kind: RoutineKind = .morning, settings: MorningSettings) -> Bool {
         let logs = (try? context.fetch(FetchDescriptor<MorningLog>())) ?? []
         let existing = log(logs, dayOf: start)?.wakeAt
-        guard let wake = settings.impliedWake(routineStart: start, existingWake: existing, calendar: calendar) else {
+        guard let wake = settings.impliedWake(routineStart: start, kind: kind, existingWake: existing, calendar: calendar) else {
             return false
         }
         recordWake(at: wake, existing: logs, goalMinutes: settings.targetWakeMinutes)

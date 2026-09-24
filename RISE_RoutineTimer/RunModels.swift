@@ -110,8 +110,32 @@ nonisolated struct RoutineRun: Codable, Equatable {
     var results: [StepResult]
     /// True once the overtime alert has fired for the current step.
     var overtimeAnnounced: Bool
+    /// Which routine is being run. Declared last, with a default, so the
+    /// memberwise initialiser's existing call sites keep compiling.
+    var kind: RoutineKind = .morning
 
     var plannedSeconds: Int { steps.reduce(0) { $0 + $1.durationSeconds } }
+}
+
+nonisolated extension RoutineRun {
+    /// In an extension so the memberwise initialiser survives. A run
+    /// persisted by a build without `kind` is a morning run — the only kind
+    /// there was — rather than a decode failure that drops it.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        steps = try container.decode([RunStep].self, forKey: .steps)
+        phase = try container.decode(Phase.self, forKey: .phase)
+        currentIndex = try container.decode(Int.self, forKey: .currentIndex)
+        startedAt = try container.decode(Date.self, forKey: .startedAt)
+        endedAt = try container.decodeIfPresent(Date.self, forKey: .endedAt)
+        stepAccumulated = try container.decode(TimeInterval.self, forKey: .stepAccumulated)
+        stepResumedAt = try container.decodeIfPresent(Date.self, forKey: .stepResumedAt)
+        pausedAt = try container.decodeIfPresent(Date.self, forKey: .pausedAt)
+        totalPausedSeconds = try container.decode(TimeInterval.self, forKey: .totalPausedSeconds)
+        results = try container.decode([StepResult].self, forKey: .results)
+        overtimeAnnounced = try container.decode(Bool.self, forKey: .overtimeAnnounced)
+        kind = try container.decodeIfPresent(RoutineKind.self, forKey: .kind) ?? .morning
+    }
 }
 
 /// Summary handed out when a run finishes or is abandoned. Session history
@@ -125,9 +149,28 @@ nonisolated struct SessionResult: Codable, Equatable, Identifiable {
     var pausedSeconds: Int
     var completed: Bool
     var steps: [StepResult]
+    /// Which routine this was a run of. Declared last, with a default, so
+    /// the memberwise initialiser's existing call sites keep compiling.
+    var kind: RoutineKind = .morning
 
     /// Positive means slower than planned, negative means faster.
     var deltaSeconds: Int { activeSeconds - plannedSeconds }
+}
+
+nonisolated extension SessionResult {
+    /// In an extension so the memberwise initialiser survives. A result
+    /// encoded before `kind` existed is a morning one.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        startedAt = try container.decode(Date.self, forKey: .startedAt)
+        endedAt = try container.decode(Date.self, forKey: .endedAt)
+        plannedSeconds = try container.decode(Int.self, forKey: .plannedSeconds)
+        activeSeconds = try container.decode(Int.self, forKey: .activeSeconds)
+        pausedSeconds = try container.decode(Int.self, forKey: .pausedSeconds)
+        completed = try container.decode(Bool.self, forKey: .completed)
+        steps = try container.decode([StepResult].self, forKey: .steps)
+        kind = try container.decodeIfPresent(RoutineKind.self, forKey: .kind) ?? .morning
+    }
 }
 
 /// One local notification the engine wants scheduled.

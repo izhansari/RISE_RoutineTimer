@@ -64,10 +64,31 @@ struct TodayView: View {
     /// The day picked out on the week chart, if any.
     @State private var selectedDay: Int?
 
-    /// Steps to hand the engine when the routine is started from here.
-    let steps: [RoutineStep]
+    /// Every saved step, both routines. Settings gets all of them; this
+    /// screen, History and the engine (when started from here) mean the
+    /// morning.
+    let allSteps: [RoutineStep]
     /// Switches the app to the Run tab.
     let onStartRoutine: () -> Void
+
+    /// Steps to hand the engine when the routine is started from here.
+    private var steps: [RoutineStep] { allSteps.routine(.morning) }
+
+    /// Today is the morning's screen. A night run in progress is still a
+    /// run — the button has to lead back to it — but it is not the morning
+    /// routine, so it never becomes today's routine start or its live column.
+    private var isMorningRunLive: Bool { engine.hasActiveRun && engine.kind == .morning }
+
+    @AppStorage(NightSettings.eveningStartKey) private var eveningStart = NightSettings.defaultEveningStartMinutes
+
+    /// After the evening start (7pm unless changed) Today is the night's
+    /// page — see `EveningView`. A morning run still going keeps the
+    /// morning; a night run going shows the night whatever the hour.
+    private func showsEvening(_ now: Date) -> Bool {
+        if isMorningRunLive { return false }
+        if engine.hasActiveRun && engine.kind == .night { return true }
+        return NightSettings.isEvening(now, eveningStartMinutes: eveningStart)
+    }
 
     private var settings: MorningSettings {
         MorningSettings(
@@ -94,7 +115,7 @@ struct TodayView: View {
     /// A run in progress hasn't been written to history yet, so the live start
     /// time has to come from the engine.
     private var effectiveStart: Date? {
-        engine.routineStartDate ?? today.routineStartAt
+        (isMorningRunLive ? engine.routineStartDate : nil) ?? today.routineStartAt
     }
 
     // MARK: - Stage
@@ -132,6 +153,16 @@ struct TodayView: View {
             // One ticking clock drives every live value on the screen.
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let now = context.date
+                if showsEvening(now) {
+                    EveningView(
+                        allSteps: allSteps,
+                        now: now,
+                        onOpenRun: onStartRoutine,
+                        onOpenRoutines: { navigation.openRoutines(kind: .night) },
+                        onOpenHistory: { navigation.openHistory(kind: .night) },
+                        onOpenSettings: { navigation.openSettings(kind: .night) }
+                    )
+                } else {
                 VStack(alignment: .leading, spacing: 0) {
                     header
 
@@ -157,14 +188,15 @@ struct TodayView: View {
                         .padding(.horizontal, 20)
                         .padding(.bottom, 6)
                 }
+                }
             }
             .background(Color(.systemBackground))
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $navigation.showsHistory) {
-                HistoryView(steps: steps)
+                HistoryView(steps: allSteps, initialKind: navigation.historyKind)
             }
             .navigationDestination(isPresented: $navigation.showsSettings) {
-                SettingsView(steps: steps)
+                SettingsView(steps: allSteps, focus: navigation.settingsKind)
             }
             .sheet(isPresented: $editingWake) { wakeEditor }
             .receiptDialog(
@@ -183,28 +215,25 @@ struct TodayView: View {
 
     // MARK: - Header
 
-    /// One line: the greeting, the goal, and the way into Settings. Settings
-    /// used to be a tab; it is somewhere you go now and then, and the tab bar
-    /// is better spent on the two things you do every morning.
+    /// The greeting with the goal beneath it, and the three ways off this
+    /// screen — Routines, History, Settings — in the corner. There is no tab
+    /// bar; this header is the app's navigation.
     private var header: some View {
         HStack(alignment: .center, spacing: 10) {
-            Text(greeting)
-                .font(.system(size: 25, weight: .bold))
-            Spacer(minLength: 4)
-            CardLabel("GOAL \(clockOfDay(settings.targetWakeMinutes))")
-                .lineLimit(1)
-                .fixedSize()
-            Button {
-                navigation.showsSettings = true
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 17))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 32, height: 32)
-                    .contentShape(Rectangle())
+            VStack(alignment: .leading, spacing: 3) {
+                Text(greeting)
+                    .font(.system(size: 25, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                CardLabel("GOAL \(clockOfDay(settings.targetWakeMinutes))")
+                    .lineLimit(1)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Settings")
+            Spacer(minLength: 4)
+            HomeHeaderButtons(
+                onRoutines: { navigation.openRoutines(kind: .morning) },
+                onHistory: { navigation.openHistory(kind: .morning) },
+                onSettings: { navigation.openSettings(kind: .morning) }
+            )
         }
         .padding(.top, 8)
     }
@@ -241,7 +270,7 @@ struct TodayView: View {
                     .fixedSize()
                 Spacer()
                 Button {
-                    navigation.showsHistory = true
+                    navigation.openHistory(kind: .morning)
                 } label: {
                     HStack(spacing: 2) {
                         Text("ALL MORNINGS")
@@ -287,7 +316,7 @@ struct TodayView: View {
             records: metrics.records, endingOn: now, days: 8,
             currentGoal: settings.targetWakeMinutes
         )
-        if engine.hasActiveRun, let start = engine.routineStartDate, var live = columns.last {
+        if isMorningRunLive, let start = engine.routineStartDate, var live = columns.last {
             live.start = MorningColumn.minutes(start, into: dayStart)
             live.end = nil
             live.pausedUntil = nil
@@ -350,7 +379,11 @@ struct TodayView: View {
             bigNumber("SINCE YOU WOKE AT \(TimeFormatting.shortClockTime(from: wake).uppercased())",
                       elapsed(now.timeIntervalSince(wake)), note: usual)
         case .running:
-            bigNumber("INTO THE ROUTINE", elapsed(TimeInterval(engine.activeElapsedSeconds)),
+            // A night run is named for what it is: this card is the
+            // morning's, and "into the routine" would read as the morning
+            // routine going at 10pm.
+            bigNumber(isMorningRunLive ? "INTO THE ROUTINE" : "INTO THE NIGHT ROUTINE",
+                      elapsed(TimeInterval(engine.activeElapsedSeconds)),
                       color: tint,
                       note: "Done at \(TimeFormatting.shortClockTime(from: engine.projectedEndDate)) on plan.")
         case .complete:

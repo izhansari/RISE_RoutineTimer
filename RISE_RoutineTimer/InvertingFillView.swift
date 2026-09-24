@@ -31,16 +31,23 @@ struct InvertingFillView<Content: View>: View {
     let fillColor: Color
     /// 0 = empty page, 1 = fully filled.
     let fillFraction: Double
+    /// The page outside the fill and the type on it. White with dark type
+    /// by day; the night routine turns the page black with white type, and
+    /// the coloured fill then rises over black instead of white.
+    var pageColor: Color = .white
+    var pageTextColor: Color = .black
     /// Built twice: once with the colour to use on the page, once with the
-    /// colour to use on the fill.
-    @ViewBuilder let content: (Color) -> Content
+    /// colour to use on the fill. The Bool says which layer is being built
+    /// — on a black page both layers set white type, so the colour alone
+    /// no longer tells the two apart.
+    @ViewBuilder let content: (_ textColor: Color, _ onFill: Bool) -> Content
 
     var body: some View {
         ZStack {
-            // Outside the fill: white page, dark type.
+            // Outside the fill: the page and its type.
             ZStack {
-                Color.white
-                content(.black)
+                pageColor
+                content(pageTextColor, false)
             }
 
             // Inside the fill: coloured page, white type. Drawn at exactly the
@@ -48,7 +55,7 @@ struct InvertingFillView<Content: View>: View {
             // the mask grows past them.
             ZStack {
                 fillColor
-                content(.white)
+                content(.white, true)
             }
             .mask(alignment: .bottom) {
                 GeometryReader { geo in

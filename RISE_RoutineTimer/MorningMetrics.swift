@@ -60,11 +60,17 @@ nonisolated struct MorningSettings: Equatable {
     /// timer running. The start is the latest you can have woken, so it is
     /// the honest stand-in, and the Today tab's EDIT corrects it.
     ///
-    /// Nil when a wake time already exists, or when the run is too far from
-    /// the target to be the morning one (an evening run must not log a
-    /// twelve-hour snooze against the week's budget).
-    func impliedWake(routineStart: Date, existingWake: Date?, calendar: Calendar = .current) -> Date? {
-        guard existingWake == nil else { return nil }
+    /// Nil when a wake time already exists, when the run is not the morning
+    /// routine at all (the night routine says nothing about waking), or when
+    /// the run is too far from the target to be the morning one (an evening
+    /// run must not log a twelve-hour snooze against the week's budget).
+    func impliedWake(
+        routineStart: Date,
+        kind: RoutineKind = .morning,
+        existingWake: Date?,
+        calendar: Calendar = .current
+    ) -> Date? {
+        guard kind == .morning, existingWake == nil else { return nil }
         let target = targetWake(on: routineStart, calendar: calendar)
         guard abs(routineStart.timeIntervalSince(target)) <= Self.morningWindow else { return nil }
         return routineStart
@@ -78,6 +84,73 @@ nonisolated struct MorningSettings: Equatable {
             snoozeBudgetMinutes: defaults.object(forKey: snoozeBudgetKey) as? Int ?? defaultSnoozeBudget,
             activationBudgetMinutes: defaults.object(forKey: activationBudgetKey) as? Int ?? defaultActivationBudget
         )
+    }
+}
+
+// MARK: - Night settings
+
+/// The night routine's one goal: the time it should have started by. The
+/// night has no wake to log and nothing to activate from — you are already
+/// up — so its only "snooze" is how late the routine began against this.
+/// Kept apart from `MorningSettings` because that struct is the morning's
+/// contract with MorningCheckin and gains nothing the web app lacks.
+nonisolated enum NightSettings {
+    static let targetStartKey = "nightTargetStartMinutes"
+    /// Whether a daily notification fires at the start goal. **On unless
+    /// switched off**: it was opt-in, defaulting off behind a switch in
+    /// Settings, and the owner — who had asked for the reminder — never
+    /// found the switch, so the first night it was due nothing fired.
+    static let reminderKey = "nightReminderEnabled"
+
+    static func storedReminderEnabled(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: reminderKey) as? Bool ?? true
+    }
+    /// Minutes after midnight.
+    static let defaultTargetStartMinutes = 22 * 60
+
+    static func storedTargetStart(in defaults: UserDefaults = .standard) -> Int {
+        defaults.object(forKey: targetStartKey) as? Int ?? defaultTargetStartMinutes
+    }
+
+    /// When the Today tab turns from the morning to the night, minutes
+    /// after midnight. Settings › Night goal.
+    static let eveningStartKey = "nightEveningStartMinutes"
+    static let defaultEveningStartMinutes = 19 * 60
+    /// The evening runs on past midnight until this — a night routine at
+    /// 12:30am is still tonight's — and hands back to the morning here.
+    static let eveningEndMinutes = 4 * 60
+
+    /// Whether `date` falls in the evening: from `eveningStart` through
+    /// midnight to 4am. An evening start at or before 4am is taken as
+    /// "never", rather than an evening that swallows the whole day.
+    static func isEvening(_ date: Date, eveningStartMinutes start: Int, calendar: Calendar = .current) -> Bool {
+        guard start > eveningEndMinutes else { return false }
+        let parts = calendar.dateComponents([.hour, .minute], from: date)
+        let minutes = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+        return minutes >= start || minutes < eveningEndMinutes
+    }
+}
+
+/// The evening page's arithmetic: if the night routine started now, when it
+/// would be done — by its plan, and by what it usually takes — and where now
+/// sits against the night's start goal.
+nonisolated struct NightOutlook: Equatable {
+    let finishOnPlan: Date
+    /// Nil until there are enough full night runs to have a usual.
+    let finishAsUsual: Date?
+    /// The start goal on the evening `now` belongs to.
+    let goal: Date
+    /// Positive: minutes left until the goal. Negative: minutes past it.
+    let minutesToGoal: Int
+
+    init(now: Date, plannedSeconds: Int, usualSeconds: Int?, goalMinutes: Int, calendar: Calendar = .current) {
+        finishOnPlan = now.addingTimeInterval(TimeInterval(plannedSeconds))
+        finishAsUsual = usualSeconds.map { now.addingTimeInterval(TimeInterval($0)) }
+        // The goal belongs to the evening, which turns over at noon, so at
+        // 12:30am the 10pm goal is the one just past, not tomorrow's.
+        let evening = MorningRecord.nightDay(of: now, calendar: calendar)
+        goal = evening.addingTimeInterval(TimeInterval(goalMinutes * 60))
+        minutesToGoal = Int((goal.timeIntervalSince(now) / 60).rounded(.down))
     }
 }
 
@@ -117,10 +190,14 @@ nonisolated struct MorningRecord: Equatable, Identifiable {
     /// purpose is walking the wake time earlier, because each move erased
     /// the evidence of the last one. The current goal is the fallback only
     /// for mornings recorded before goals were stored.
+    ///
+    /// Measured from the record's own `day`, not from midnight before the
+    /// wake: a night routine that begins at half past midnight belongs to
+    /// the evening before, and against a 10pm goal that is 150 minutes late,
+    /// not 21 hours early. For a morning the two are the same midnight.
     func snoozeMinutes(settings: MorningSettings, calendar: Calendar = .current) -> Int? {
         guard let wakeAt else { return nil }
-        let target = calendar.startOfDay(for: wakeAt)
-            .addingTimeInterval(TimeInterval(goal(settings: settings) * 60))
+        let target = day.addingTimeInterval(TimeInterval(goal(settings: settings) * 60))
         return Int((wakeAt.timeIntervalSince(target) / 60).rounded())
     }
 
@@ -156,12 +233,13 @@ nonisolated struct MorningRecord: Equatable, Identifiable {
         return Int((routineEndAt.timeIntervalSince(routineStartAt) / 60).rounded())
     }
 
-    /// Wake time expressed as minutes after midnight, for the consistency spread.
+    /// Wake time expressed as minutes into the record's day, for the
+    /// consistency spread. Into the *day* rather than the clock's own
+    /// minutes after midnight, so a night that ran past midnight is 1470,
+    /// next to its 11pm neighbours, rather than 30, a day away from them.
     func wakeMinutesAfterMidnight(calendar: Calendar = .current) -> Int? {
         guard let wakeAt else { return nil }
-        let parts = calendar.dateComponents([.hour, .minute], from: wakeAt)
-        guard let hour = parts.hour, let minute = parts.minute else { return nil }
-        return hour * 60 + minute
+        return Int((wakeAt.timeIntervalSince(day) / 60).rounded())
     }
 }
 
@@ -172,11 +250,22 @@ nonisolated struct MorningMetrics {
     let records: [MorningRecord]
     let settings: MorningSettings
     var calendar: Calendar = .current
+    /// Which routine these records describe. The maths is the same for both
+    /// — a night's "wake" is the moment its routine began — but the words
+    /// are not, and the night has no activation to speak of.
+    var kind: RoutineKind = .morning
 
-    init(records: [MorningRecord], settings: MorningSettings, calendar: Calendar = .current) {
+    init(records: [MorningRecord], settings: MorningSettings, calendar: Calendar = .current, kind: RoutineKind = .morning) {
         self.records = records.sorted { $0.day > $1.day }
         self.settings = settings
         self.calendar = calendar
+        self.kind = kind
+    }
+
+    /// The metrics that mean something for this routine. The night has no
+    /// activation: you were already up, and its snooze is the whole story.
+    var metrics: [Metric] {
+        kind == .night ? [.snooze, .duration] : Metric.allCases
     }
 
     /// The three metrics, as one type so the UI can loop over them.
@@ -352,16 +441,19 @@ nonisolated struct MorningMetrics {
         let complete = records.filter(\.isComplete)
         guard !complete.isEmpty else { return ["Keep logging — insights build over time."] }
 
+        let noun = kind == .night ? "night" : "morning"
         var lines: [String] = []
-        lines.append("You've logged \(complete.count) morning\(complete.count == 1 ? "" : "s") total.")
+        lines.append("You've logged \(complete.count) \(noun)\(complete.count == 1 ? "" : "s") total.")
 
-        var latencyStreak = 0
-        for record in complete {
-            guard let latency = record.activationMinutes, latency < 10 else { break }
-            latencyStreak += 1
-        }
-        if latencyStreak >= 2 {
-            lines.append("Activation under 10 min — \(latencyStreak) days in a row.")
+        if kind == .morning {
+            var latencyStreak = 0
+            for record in complete {
+                guard let latency = record.activationMinutes, latency < 10 else { break }
+                latencyStreak += 1
+            }
+            if latencyStreak >= 2 {
+                lines.append("Activation under 10 min — \(latencyStreak) days in a row.")
+            }
         }
 
         let last7 = Array(complete.prefix(7))
@@ -374,17 +466,17 @@ nonisolated struct MorningMetrics {
             }
             let improvement = Int((mean(prior7) - mean(last7)).rounded())
             if improvement > 0 {
-                lines.append("Waking \(improvement) min earlier than the week before.")
+                lines.append("\(kind == .night ? "Starting" : "Waking") \(improvement) min earlier than the week before.")
             }
         }
 
         let onTime = last7.filter { ($0.snoozeMinutes(settings: settings, calendar: calendar) ?? 1) <= 0 }.count
         if last7.count >= 5, onTime > 0 {
-            lines.append("\(onTime) of your last \(last7.count) mornings started on time.")
+            lines.append("\(onTime) of your last \(last7.count) \(noun)s started on time.")
         }
 
         if let spread = wakeConsistencyMinutes(days: 7, now: now), spread <= 15 {
-            lines.append("Solid consistency this week — ±\(spread) min spread in wake time.")
+            lines.append("Solid consistency this week — ±\(spread) min spread in \(kind == .night ? "start" : "wake") time.")
         }
 
         let missed = missedDays(now: now)

@@ -18,7 +18,11 @@ struct RoutineListView: View {
     @State private var path = NavigationPath()
     @State private var confirmingRestore = false
 
+    /// The steps of one routine — the caller filters (`steps.routine(_:)`).
     let steps: [RoutineStep]
+    /// Which routine this list is, so new, duplicated and restored steps
+    /// land in it.
+    var kind: RoutineKind = .morning
 
     private var plannedSeconds: Int { steps.reduce(0) { $0 + $1.durationSeconds } }
 
@@ -55,7 +59,7 @@ struct RoutineListView: View {
                     }
                 }
             }
-            .navigationTitle("Edit Routine")
+            .navigationTitle(kind.title)
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: StepEditRequest.self) { request in
                 StepEditorView(request: request)
@@ -68,7 +72,7 @@ struct RoutineListView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .confirmationDialog("Replace your routine with the starter one?", isPresented: $confirmingRestore, titleVisibility: .visible) {
+            .confirmationDialog("Replace your \(kind.noun) routine with the starter one?", isPresented: $confirmingRestore, titleVisibility: .visible) {
                 Button("Replace Routine", role: .destructive) { restoreStarterRoutine() }
                 Button("Cancel", role: .cancel) {}
             } message: {
@@ -85,7 +89,8 @@ struct RoutineListView: View {
             durationSeconds: 5 * 60,
             autoNext: true,
             notes: "",
-            sortOrder: nextSortOrder
+            sortOrder: nextSortOrder,
+            kind: kind
         )
         modelContext.insert(step)
         saveChanges()
@@ -101,7 +106,8 @@ struct RoutineListView: View {
             autoNext: source.autoNext,
             notes: source.notes,
             autoShowNotes: source.autoShowNotes,
-            sortOrder: nextSortOrder
+            sortOrder: nextSortOrder,
+            kind: kind
         )
         modelContext.insert(copy)
         if let index = reordered.firstIndex(where: { $0 === source }) {
@@ -118,14 +124,15 @@ struct RoutineListView: View {
     private func restoreStarterRoutine() {
         withAnimation {
             for step in steps { modelContext.delete(step) }
-            for (index, seed) in RoutineStep.starterRoutine.enumerated() {
+            for (index, seed) in RoutineStep.starterRoutine(for: kind).enumerated() {
                 modelContext.insert(RoutineStep(
                     title: seed.title,
                     icon: seed.icon,
                     durationSeconds: seed.durationSeconds,
                     autoNext: seed.autoNext,
                     notes: seed.notes,
-                    sortOrder: index
+                    sortOrder: index,
+                    kind: kind
                 ))
             }
             saveChanges()

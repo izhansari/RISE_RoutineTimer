@@ -24,21 +24,40 @@ struct SettingsView: View {
     @AppStorage(MorningSettings.targetWakeKey) private var targetWakeMinutes = MorningSettings.defaultTargetWakeMinutes
     @AppStorage(MorningSettings.snoozeBudgetKey) private var snoozeBudget = MorningSettings.defaultSnoozeBudget
     @AppStorage(MorningSettings.activationBudgetKey) private var activationBudget = MorningSettings.defaultActivationBudget
+    @AppStorage(NightSettings.targetStartKey) private var nightTargetStart = NightSettings.defaultTargetStartMinutes
+    @AppStorage(NightSettings.reminderKey) private var nightReminderEnabled = true
+    @AppStorage(NightSettings.eveningStartKey) private var eveningStart = NightSettings.defaultEveningStartMinutes
 
+    /// Every step of both routines; the morning goal and target below only
+    /// ever mean the morning one.
     let steps: [RoutineStep]
+    /// The routine Today was showing when Settings was opened. Its goal
+    /// section comes first, so the night page lands on the night's settings.
+    var focus: RoutineKind = .morning
 
-    @State private var editingList = false
+    /// The full step list being shown, if any — one per routine.
+    @State private var editingList: RoutineKind?
 
-    private var plannedSeconds: Int { steps.reduce(0) { $0 + $1.durationSeconds } }
+    private var morningSteps: [RoutineStep] { steps.routine(.morning) }
+    private var plannedSeconds: Int { morningSteps.reduce(0) { $0 + $1.durationSeconds } }
     private var schedule: TargetSchedule { TargetSchedule(targetMinutesAfterMidnight: targetMinutes) }
 
     var body: some View {
     List {
             routineSection
-            timerSection
-            alertsSection
-            wakeGoalSection
-            targetSection
+            if focus == .night {
+                nightGoalSection
+                timerSection
+                alertsSection
+                wakeGoalSection
+                targetSection
+            } else {
+                timerSection
+                alertsSection
+                wakeGoalSection
+                nightGoalSection
+                targetSection
+            }
             #if DEBUG
             debugSection
             #endif
@@ -46,12 +65,14 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
-        .sheet(isPresented: $editingList) {
-            RoutineListView(steps: steps)
+        .sheet(item: $editingList) { kind in
+            RoutineListView(steps: steps.routine(kind), kind: kind)
         }
         .onChange(of: targetMinutes) { _, _ in syncReminder() }
         .onChange(of: reminderEnabled) { _, _ in syncReminder() }
         .onChange(of: plannedSeconds) { _, _ in syncReminder() }
+        .onChange(of: nightTargetStart) { _, _ in syncNightReminder() }
+        .onChange(of: nightReminderEnabled) { _, _ in syncNightReminder() }
     }
 
     #if DEBUG
@@ -67,8 +88,10 @@ struct SettingsView: View {
             Button {
                 DebugSeed.populate(
                     context: modelContext,
-                    steps: steps,
-                    settings: MorningSettings(targetWakeMinutes: targetWakeMinutes)
+                    steps: morningSteps,
+                    settings: MorningSettings(targetWakeMinutes: targetWakeMinutes),
+                    nightSteps: steps.routine(.night),
+                    nightGoalMinutes: nightTargetStart
                 )
             } label: {
                 Label("Seed Sample History", systemImage: "wand.and.stars")
@@ -103,13 +126,16 @@ struct SettingsView: View {
     /// is only for reordering, deleting several at once, or starting over.
     private var routineSection: some View {
         Section {
-            Button { editingList = true } label: {
-                Label("Full Step List", systemImage: "list.bullet")
+            // The routine Today was showing comes first.
+            ForEach(focus == .night ? [RoutineKind.night, .morning] : [RoutineKind.morning, .night]) { kind in
+                Button { editingList = kind } label: {
+                    Label("\(kind.title) Steps", systemImage: kind.symbol)
+                }
             }
         } header: {
-            Text("Routine")
+            Text("Routines")
         } footer: {
-            Text("Edit, add, reorder and delete steps on the Run tab. The full list is for duplicating a step or restoring the starter routine.")
+            Text("Edit, add, reorder and delete steps on the Routines screen, which switches between the morning and the night. The full lists are for duplicating a step or restoring a starter routine.")
         }
     }
 
@@ -180,6 +206,40 @@ struct SettingsView: View {
         }
     }
 
+    /// The night's only goal: when the routine should have begun. Stamped on
+    /// each night run as it is saved, so moving it later does not rewrite
+    /// the nights already had.
+    private var nightGoalSection: some View {
+        Section {
+            DatePicker("Start by", selection: nightGoalBinding, displayedComponents: .hourAndMinute)
+            Toggle("Remind me at this time", isOn: $nightReminderEnabled)
+            DatePicker("Today shows the night from", selection: eveningStartBinding, displayedComponents: .hourAndMinute)
+        } header: {
+            Text("Night goal")
+        } footer: {
+            Text("How late the night routine begins against this is its snooze. There is no activation at night — you are already up. The reminder is a daily notification at the goal itself. From the evening time until 4 AM, Today shows when you'd finish the night routine if you started now, and the app goes dark.")
+        }
+    }
+
+    private var eveningStartBinding: Binding<Date> {
+        Binding {
+            Calendar.current.startOfDay(for: Date()).addingTimeInterval(TimeInterval(eveningStart * 60))
+        } set: { date in
+            let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+            eveningStart = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+        }
+    }
+
+    private var nightGoalBinding: Binding<Date> {
+        Binding {
+            Calendar.current.startOfDay(for: Date())
+                .addingTimeInterval(TimeInterval(nightTargetStart * 60))
+        } set: { date in
+            let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+            nightTargetStart = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+        }
+    }
+
     private var wakeGoalBinding: Binding<Date> {
         Binding {
             Calendar.current.startOfDay(for: Date())
@@ -228,6 +288,10 @@ struct SettingsView: View {
         }
     }
 
+
+    private func syncNightReminder() {
+        RoutineNotificationManager.scheduleNightReminder(atMinutesAfterMidnight: nightReminderEnabled ? nightTargetStart : nil)
+    }
 
     private func syncReminder() {
         guard reminderEnabled, let target = schedule.targetDate(on: Date()) else {

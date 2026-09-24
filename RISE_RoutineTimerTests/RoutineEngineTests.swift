@@ -375,6 +375,52 @@ final class RoutineEngineTests: XCTestCase {
         XCTAssertEqual(decoded, run)
     }
 
+    // MARK: - Which routine
+
+    /// A run is the kind it was started as, all the way through to the
+    /// session it leaves behind — that is what keeps the night's runs out
+    /// of the morning's averages.
+    func testANightRunFinishesAsANightSession() {
+        let engine = RoutineEngine(store: nil, usesWallClock: false, now: t0)
+        let log = EventLog()
+        engine.onEvent = { log.events.append($0) }
+        engine.start(steps: makeSteps(), kind: .night, at: t0)
+        XCTAssertEqual(engine.kind, .night)
+
+        for _ in 0..<4 { engine.completeCurrentStep(at: at(10)) }
+        guard case .completed(let result)? = log.events.last else {
+            return XCTFail("expected a completed event, got \(String(describing: log.events.last))")
+        }
+        XCTAssertEqual(result.kind, .night)
+
+        // Abandoning carries it too.
+        let (other, otherLog) = startedEngine()
+        other.abandon(at: at(5))
+        guard case .abandoned(let abandoned)? = otherLog.events.last else {
+            return XCTFail("expected an abandoned event")
+        }
+        XCTAssertEqual(abandoned.kind, .morning, "start(steps:) with no kind is the morning routine")
+    }
+
+    /// The run file written by a build before the night routine existed has
+    /// no `kind`. It has to load as a morning run rather than fail to decode
+    /// and drop a routine that was in progress across the update.
+    func testARunSavedBeforeKindsExistedIsAMorningRun() throws {
+        let engine = RoutineEngine(store: nil, usesWallClock: false, now: t0)
+        engine.start(steps: makeSteps(), kind: .night, at: t0)
+        let run = try XCTUnwrap(engine.run)
+
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(run)) as? [String: Any])
+        XCTAssertEqual(json["kind"] as? String, "night")
+        json.removeValue(forKey: "kind")
+
+        let legacy = try JSONSerialization.data(withJSONObject: json)
+        let decoded = try JSONDecoder().decode(RoutineRun.self, from: legacy)
+        XCTAssertEqual(decoded.kind, .morning)
+        XCTAssertEqual(decoded.steps, run.steps)
+        XCTAssertEqual(decoded.startedAt, run.startedAt)
+    }
+
     // MARK: - Notification planning
 
     func testPlannedAlertsFollowAutoChainAndStopAtManualStep() {

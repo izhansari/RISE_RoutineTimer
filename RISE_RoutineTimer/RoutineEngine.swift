@@ -183,6 +183,8 @@ final class RoutineEngine {
     var hasActiveRun: Bool { isRunning || isPaused }
 
     var steps: [RunStep] { run?.steps ?? [] }
+    /// Which routine is being run; nil with no run.
+    var kind: RoutineKind? { run?.kind }
     var currentIndex: Int { run?.currentIndex ?? 0 }
     var results: [StepResult] { run?.results ?? [] }
 
@@ -308,7 +310,7 @@ final class RoutineEngine {
 
     // MARK: - Actions
 
-    func start(steps: [RunStep], at date: Date = Date()) {
+    func start(steps: [RunStep], kind: RoutineKind = .morning, at date: Date = Date()) {
         guard !steps.isEmpty else { return }
         now = date
         run = RoutineRun(
@@ -322,7 +324,8 @@ final class RoutineEngine {
             pausedAt: nil,
             totalPausedSeconds: 0,
             results: [],
-            overtimeAnnounced: false
+            overtimeAnnounced: false,
+            kind: kind
         )
         persist()
         startClock()
@@ -623,7 +626,8 @@ final class RoutineEngine {
             activeSeconds: run.results.reduce(0) { $0 + $1.actualSeconds } + Int(extraActiveSeconds.rounded()),
             pausedSeconds: Int(run.totalPausedSeconds.rounded()),
             completed: completed,
-            steps: run.results
+            steps: run.results,
+            kind: run.kind
         )
     }
 

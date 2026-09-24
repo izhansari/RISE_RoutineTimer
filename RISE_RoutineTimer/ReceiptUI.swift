@@ -255,3 +255,105 @@ struct ReceiptStatRow: View {
         .padding(.vertical, 8)
     }
 }
+
+// MARK: - Routine Switch
+
+/// MORNING | NIGHT, in the tracked-caps register: the selected routine is a
+/// filled capsule, the other an outlined one, the same two states
+/// `ReceiptTogglePill` uses. Bound to the raw `RoutineKind` so it can sit
+/// straight on an `@AppStorage` value. The Run tab and History both use it.
+struct RoutineKindSwitch: View {
+    @Binding var selected: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(RoutineKind.allCases) { kind in
+                let isOn = selected == kind.rawValue
+                Button {
+                    selected = kind.rawValue
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: kind.symbol)
+                            .font(.system(size: 9, weight: .semibold))
+                        Text(kind.label)
+                            .font(.system(size: 10, weight: .semibold))
+                            .tracking(1.5)
+                    }
+                    .foregroundStyle(isOn ? Color(.systemBackground) : Color.primary.opacity(0.6))
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .background {
+                        if isOn {
+                            Capsule().fill(Color.primary)
+                        } else {
+                            Capsule().strokeBorder(Color.primary.opacity(0.3), lineWidth: 1.5)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(kind.title)
+                .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+// MARK: - Streak badge
+
+/// "4 DAY STREAK" in the corner of a page: the count in the receipt face, the
+/// words stacked small beside it. The Run tab wraps it in a button that opens
+/// History; History shows it plain.
+struct StreakBadge: View {
+    let days: Int
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 6) {
+            Text("\(days)")
+                .font(analogFont(18))
+                .monospacedDigit()
+            VStack(alignment: .leading, spacing: 0) {
+                Text("DAY")
+                Text("STREAK")
+            }
+            .font(.system(size: 7.5, weight: .semibold))
+            .tracking(1.2)
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(days) day streak")
+    }
+}
+
+// MARK: - Home header buttons
+
+/// Routines, History, Settings: the three places reachable from Today, now
+/// that there is no tab bar. Plain icons in the header's corner, the same on
+/// the morning page and the night page (which passes its own ink).
+struct HomeHeaderButtons: View {
+    var color: Color = .secondary
+    let onRoutines: () -> Void
+    let onHistory: () -> Void
+    let onSettings: () -> Void
+
+    var body: some View {
+        HStack(spacing: 2) {
+            icon("list.bullet", label: "Routines", action: onRoutines)
+            icon("chart.bar.xaxis", label: "History", action: onHistory)
+            icon("gearshape", label: "Settings", action: onSettings)
+        }
+    }
+
+    private func icon(_ name: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: name)
+                .font(.system(size: 17))
+                .foregroundStyle(color)
+                .frame(width: 36, height: 36)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+}

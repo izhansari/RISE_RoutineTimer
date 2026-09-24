@@ -587,6 +587,138 @@ as a rendering fault and is the most common non-morning state; "Good evening" is
 carries no information while `GOAL 6:30AM` is 11pt grey; today's empty column is a full-height grey band that reads
 as a placeholder; the budget pips round down, so `7 OF 60 MIN` sits beside five minutes of drawing.
 
+### Run 34 — A second routine: the night (2026-09-23)
+
+The owner wants to start a night routine and has no picture of it yet — so the job was a place to sketch one and a
+way to run it, not a night-time accountability layer. That comes once there is something to be accountable *for*.
+
+- **`RoutineKind`** (`morning` / `night`) is stamped on every `RoutineStep`, on the frozen `RoutineRun` and on every
+  saved `RoutineSession`, all as a raw string with a `morning` default, so the existing data and the run file written
+  by the previous build decode unchanged (`RoutineRun` / `SessionResult` grew hand-written `init(from:)`s for it).
+- **The Run tab switches** with a MORNING | NIGHT pair under its title; the selection is `@AppStorage` and follows
+  a run started by an intent. Each routine has its own order, its own ADD STEP, its own stats, streak and context
+  line. The night list is seeded once with a seven-step draft, all manual, and is never re-seeded over the sketch.
+- **What the night must not touch:** a night run implies no wake time (`impliedWake(kind:)`), `MorningRecord.join`
+  skips night sessions, History and its stats are morning-only, the finish-by target is held to `.none` for a night
+  run, and Today names a live night run for what it is instead of drawing it into the morning column.
+- Start Night Routine intent and shortcut; the full step list in Settings is one per routine, each with its own
+  starter to restore.
+- Not done yet, on purpose: anywhere to see past night runs beyond the post-run summary and the per-step stats, a
+  bedtime goal (the mirror of the wake goal), and whatever Today should say at night.
+- 171 → 179 tests.
+
+### Run 35 — The night in black, and on History (2026-09-23)
+
+Same day, from trying it: the night timer should not be a white page at 11pm, and History should have a
+MORNING | NIGHT switch of its own — with the owner's own framing of what the night measures: no activation ("I'm
+already awake"), only a snooze against the time the night routine was meant to start.
+
+- **The night timer runs on a black page.** `InvertingFillView` gained `pageColor` / `pageTextColor` and tells its
+  content which layer it is building (`onFill`), because on a black page both layers set white type and the colour
+  alone no longer told the chips apart. The fill still rises in the theme colour; the chips' ghost discs go to 12%
+  white on the page so a white glyph is not swallowed.
+- **History is one routine at a time**, switched at the top with the Run tab's `RoutineKindSwitch` (now in
+  `ReceiptUI`). Stats, chart, baselines, insights, suggestions and the session list all follow the selection.
+- **The night's accountability reuses the morning's shape.** `MorningRecord.joinNights` builds one record per night
+  from the night sessions, with the run's start standing as the "wake": snooze is how late it began against the
+  night goal, activation is nought and hidden (`MorningMetrics.metrics`), the box is the routine. A night's day
+  turns over at noon (`nightDay`), so half past midnight is the evening before — and `snoozeMinutes` /
+  `wakeMinutesAfterMidnight` now measure from the record's own day, which for a morning is the same midnight.
+- **The night goal is a setting, and history.** Settings › Night goal › Start by (default 10pm); the recorder stamps
+  it on each night session (`RoutineSession.goalMinutes`) as it is saved, so the goal line steps and moving the
+  goal does not rewrite past nights — the same rule as `MorningLog.goalMinutes`.
+- The chart, legend, readout and insights say "started" / "nights" where they said "woke" / "mornings"; the 0-minute
+  gap label is left off night columns. Sample nights join the DEBUG seed.
+- **A daily reminder at the night goal** (Settings › Night goal › Remind me at this time): one repeating calendar
+  notification, `rise-night-reminder`, replaced when the goal moves and removed when switched off. It goes through
+  the notification manager's queue so `settle()` covers it and `RoutineNotificationTests` can read it back.
+- Known rough edge: `AVG START` on the tiles averages clock times, so nights either side of midnight would average
+  to noon. Not fixed; the seed keeps its nights before midnight.
+- **History keeps one summary.** The four stat tiles (all-time, full runs only, to the second) sat above a chart
+  readout (the fortnight on screen, whole minutes) and read as the same numbers disagreeing; the owner called it
+  information overload and chose the readout. The tiles are gone, the "Mornings" / "Nights" section header is gone
+  (the switch at the top already says which), and the readout gained an ALL | 7 DAYS | 30 DAYS switch
+  (`HistoryAveragePeriod`) so "AVERAGE OF · ALL" is over every morning, not the page. Its title row has a fixed
+  height whether it holds the switch or OPEN RUN ›, so selecting a day no longer shoves the chart down. The streak
+  moved to the toolbar as the same badge the Run tab wears (`StreakBadge`, shared in `ReceiptUI`).
+- **History's lists are short by default.** Sessions show five with a `SHOW 5 MORE · N LEFT` row that adds a page
+  at a time; suggestions are one line each — step, `PLAN 12:00 · USUALLY 6:47 · 10 RUNS`, and the new time as the
+  button — sorted by the size of the change, three shown and `N MORE` for the rest. Both reset when the routine
+  switch changes. Before this, forty session rows and sixteen three-line suggestions made the page a scroll to nowhere.
+- 179 → 185 tests.
+
+### Today, second round — analysis and prototypes (2026-09-23)
+
+The owner: "I'm not a fan of it. It's information overload." Asked for an analysis first, then options.
+
+**What the page is.** A greeting in the largest type; the eight-day week chart (half the screen); a 50pt stopwatch
+counting up with a grey note under it; two budget rows of dozens of pips; the button. **What it answers:** how the
+week went, what phase you are in and for how long, how much of two weekly allowances you have burned, what to do.
+**What it feels like:** graded before you have done anything. Everything below the chart goes red, the stopwatch
+only counts up, the pips read "356 OF 60 MIN" with six days still to go, and "budget" frames the morning as debt.
+**Does it inform?** The chart is the one element carrying real information and it needs decoding (a clock, five
+marks, eight columns); the stopwatch says what you already know; the one useful line — "you usually start 11 min
+after waking" — is the smallest grey text on the page; today's snooze is drawn three times. **Is it a first page?**
+A landing page at 6:30 has two jobs: get one tap, and say in a glance whether today is on track. Week review and
+budget accounting are for afterwards, or History. This is a dashboard where a landing should be.
+
+**Prototypes** F–I in `DesignLab.swift`, Settings › Developer › Design Mockups › "Today, second round". All four share:
+no greeting (a quiet date-and-goal line), no stopwatch, no budgets, one plain sentence with the comparison to usual
+written in and ending on what to do, the button. Each steps In bed → Up → Running → Done.
+- **F · Pruned** — the week chart kept, everything else cut. Lowest risk; the chart still leads and still needs decoding.
+- **G · Receipt** — WOKE / STARTED / ROUTINE as three receipt lines filling in as they happen, the current one ticking,
+  each finished line with its verdict against usual; the week as seven on-time / late marks. My favourite for a landing.
+- **H · Habit** — the streak as the headline over a month of dots (on time / late / missed), today's dot alive.
+  Strongest feeling, least information: 5 minutes late and 90 are the same dot.
+- **I · Today vs usual** — today's column beside a faded "usual" column on one clock; the comparison is spatial. Keeps
+  the app's one drawing at a size that finally reads; still a clock at 6:30.
+
+**Third round (J–L)**, after the owner rejected F–H ("this is ass"), leaned to I, and asked for History's readout
+language and budgets as draining health bars. Running barely matters: you are in the timer then.
+- **J · Today vs usual, in History's words** — History's readout box (WOKE · TO START · ROUTINE, each with its
+  difference from usual beneath), I's today-vs-usual columns with History's mark chips, then the health bars.
+- **K · The week, History's chart** — History's readout ("TODAY VS" with 7 / 30 DAYS pills) over a seven-day version
+  of History's chart with today's marks labelled, then the health bars.
+- **L · Health bars first** — two large draining bars ("THIS WEEK'S SLACK"), then TODAY against USUAL as a two-row
+  table in the readout's register. No chart.
+- Health bar: full at the start of the week, solid part is what is left, the pale part beside it is what today took,
+  ten-minute notches, theme colour → amber under a quarter → red and "EMPTY · N OVER". The live one breathes and
+  carries NOW. Open question: on a bad week both are empty by Wednesday; a daily reset may suit better.
+
+### Run 36 — Today after dark (2026-09-23)
+
+From 7pm (Settings › Night goal › "Today shows the night from") until 4am, the Today tab is the night's page
+(`EveningView`): TONIGHT and the start goal at the top, then one answer in large type — **START NOW, DONE BY 11:02PM**
+— with the plan's length and step count, the finish at your usual pace once there are two full night runs, and where
+now sits against the start goal. The night's step glyphs sit above START NIGHT ROUTINE. A night run in progress shows
+its projected finish and BACK TO ROUTINE; a finished one, DONE AT and NIGHT LOGGED. A morning run in progress keeps the
+morning page whatever the hour. The rule is `NightSettings.isEvening` (an evening start at or before 4am means never);
+the arithmetic is `NightOutlook`, whose goal belongs to the evening, so at 12:30am the 10pm goal is the one just past.
+185 → 189 tests.
+
+Then, at the owner's ask, the evening page went **black** — white type, the night timer's register — and it
+requests the dark colour scheme, which turns the whole app dark from the evening start to 4am: a night mode. Checked
+on the Run tab list, the run sheet and the tab bar; semantic colours carry it.
+
+### Run 37 — No tab bar (2026-09-23)
+
+The owner lost the way to History from the night page and said "I hate having the tabs at the bottom". The tab bar is
+gone. Today is home morning and evening; its header has Routines, History and Settings icons. Routines (the old Run
+tab) opens full-screen with a ⌄ to close; History and Settings push. On the night page START BY moved under TONIGHT
+as its subtitle, and the morning page's goal moved under the greeting the same way. 189 tests.
+
+Then: the icons follow the mode. From the night page, Routines opens on NIGHT whatever the list was last left on,
+History on NIGHT, and Settings leads with the Night goal and the night's step list; from the morning page, the morning.
+
+### Run 38 — The night reminder that never fired (2026-09-23)
+
+The owner's reminder did not go off. Their saved preferences (copied off the phone) had the goal at 11:00 PM and no
+value at all for the reminder switch: it had never been turned on, because it defaulted off and lived only in
+Settings, and nothing scheduled it unless that switch changed. Now it is on unless switched off and is scheduled at
+every launch. A second gap: there was no notification delegate, so any reminder arriving while the app was open was
+dropped; `NotificationPresenter` now shows reminders in the foreground (step alerts stay silent there — the app chimes
+them). 189 → 191 tests.
+
 ### Later (next)
 17. iCloud sync via SwiftData + CloudKit (decide **before** run 2: CloudKit requires all properties to have defaults and all relationships optional, which constrains the `RoutineSession` design).
 18. Multiple routines / profiles if "our routine" means more than one person.

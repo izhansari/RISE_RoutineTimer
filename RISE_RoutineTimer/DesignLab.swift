@@ -104,7 +104,28 @@ struct DesignLabView: View {
             } header: {
                 Text("Today")
             } footer: {
-                Text("One morning, read at a glance. Use the picker at the top of each to step through the morning's states. E is the newest: everything on one screen, History as a link, and both budgets on screen with the one you're spending showing it.")
+                Text("One morning, read at a glance. Use the picker at the top of each to step through the morning's states. E became the real screen.")
+            }
+
+            Section {
+                NavigationLink("F · Pruned: the chart and one sentence") { TodayPrunedLab() }
+                NavigationLink("G · Receipt: the morning printed line by line") { TodayReceiptLinesLab() }
+                NavigationLink("H · Habit: a month of dots") { TodayHabitLab() }
+                NavigationLink("I · Today against usual") { TodayVersusUsualLab() }
+            } header: {
+                Text("Today, second round")
+            } footer: {
+                Text("Answers to \"it's information overload\": each keeps one idea from the current page and drops the rest. No budgets, no stopwatch. Step through In bed → Up → Running → Done on each.")
+            }
+
+            Section {
+                NavigationLink("J · Today vs usual, in History's words") { TodayUsualReadoutLab() }
+                NavigationLink("K · The week, History's chart") { TodayWeekReadoutLab() }
+                NavigationLink("L · Health bars first") { TodayHealthFirstLab() }
+            } header: {
+                Text("Today, third round")
+            } footer: {
+                Text("I's comparison, told with History's readout box and mark labels, and the two budgets as health bars that drain from full. The pale end of each bar is what today has taken.")
             }
 
             Section {
@@ -1893,6 +1914,1094 @@ private struct LabFixedScreen<Content: View, Bottom: View>: View {
             }
         }
         .sheet(isPresented: $showingNotes) { LabNotesSheet(notes: notes) }
+    }
+}
+
+// MARK: - Today, second round · shared
+
+/// The four moments of a morning the second-round mockups step through.
+private enum LabMoment: String, CaseIterable { case inBed = "In bed", up = "Up", running = "Running", done = "Done" }
+
+/// The facts every second-round mockup is drawn from — the owner's Sat Sep 19
+/// (woke 11:52 against an assumed 11:00 goal, started 12:40, 24 minutes of
+/// routine) and the seven mornings before it. A poor morning on purpose: the
+/// test of a landing page is whether it can say "late" without shouting.
+private enum LabToday {
+    static let goal = Lab.goal                 // 11:00
+    static let wake = 712                      // 11:52
+    static let start = 760                     // 12:40
+    static let end = 784                       // 1:04
+    static let routine = 24
+    /// Seven-morning usual.
+    static let usualWake = 682                 // 11:22
+    static let usualLag = Lab.usualLag         // 33
+    static let usualRoutine = Lab.usualRoutine // 27
+    static let streak = 4
+
+    /// Where the clock is in each moment.
+    static func now(_ moment: LabMoment) -> Int {
+        switch moment {
+        case .inBed: return 672        // 11:12
+        case .up: return 730           // 12:10
+        case .running: return 770      // 12:50
+        case .done: return end
+        }
+    }
+
+    /// The one sentence the page says, in each moment. Plain words, the
+    /// comparison to usual built in, and always ending on what to do.
+    static func sentence(_ moment: LabMoment) -> String {
+        switch moment {
+        case .inBed:
+            return "12 min past your 11:00 goal. You're usually up by 11:22 — get up now and you beat it."
+        case .up:
+            return "Up at 11:52. You usually start within 33 min; it's been 18."
+        case .running:
+            return "10 min into the routine. Done by 1:04 on plan."
+        case .done:
+            return "Done at 1:04. The routine took 24 min, 3 quicker than usual. You woke 52 min late."
+        }
+    }
+
+    static func cta(_ moment: LabMoment) -> String {
+        switch moment {
+        case .inBed: return "I'M AWAKE"
+        case .up: return "START ROUTINE"
+        case .running: return "BACK TO ROUTINE"
+        case .done: return "MORNING LOGGED"
+        }
+    }
+
+    /// The last seven mornings including today, as columns.
+    static let week: [LabMorning] = Array(Lab.mornings.suffix(7))
+}
+
+private struct LabMomentPicker: View {
+    @Binding var moment: LabMoment
+    var body: some View {
+        Picker("Moment", selection: $moment.animation(.easeInOut(duration: 0.3))) {
+            ForEach(LabMoment.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+        }
+        .pickerStyle(.segmented)
+    }
+}
+
+/// The small header every second-round page shares: the date and the goal
+/// on one quiet line, the gear where it is today. No greeting — it was the
+/// largest type on the page and carried nothing.
+private struct LabDateLine: View {
+    var body: some View {
+        HStack {
+            LabLabel("Sat 19 Sep", color: .primary)
+            Spacer()
+            LabLabel("Goal 11:00")
+            Image(systemName: "gearshape")
+                .font(.system(size: 15))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 6)
+        }
+    }
+}
+
+/// The one sentence, set in the system face at reading size — the receipt
+/// face is for labels and digits, and a sentence is neither.
+private struct LabSentence: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(.system(size: 19, weight: .regular))
+            .lineSpacing(3)
+            .foregroundStyle(.primary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentTransition(.identity)
+    }
+}
+
+/// Today's column in a given moment, so the mockups agree about what is
+/// drawn when.
+private extension LabColumn {
+    static func today(_ moment: LabMoment, range: ClosedRange<Int>, height: CGFloat, tint: Color) -> LabColumn {
+        switch moment {
+        case .inBed:
+            return LabColumn(goal: LabToday.goal, wake: nil, start: nil, end: nil, now: LabToday.now(.inBed), range: range, height: height, tint: tint)
+        case .up:
+            return LabColumn(goal: LabToday.goal, wake: LabToday.wake, start: nil, end: nil, now: LabToday.now(.up), range: range, height: height, tint: tint)
+        case .running:
+            return LabColumn(goal: LabToday.goal, wake: LabToday.wake, start: LabToday.start, end: nil, now: LabToday.now(.running), range: range, height: height, tint: tint)
+        case .done:
+            return LabColumn(goal: LabToday.goal, wake: LabToday.wake, start: LabToday.start, end: LabToday.end, range: range, height: height, tint: tint)
+        }
+    }
+}
+
+// MARK: - Today F · Pruned
+
+/// The current page with everything but its best element cut. The week
+/// chart stays, because it is the one thing on the page that carries the
+/// shape of the week; the stopwatch, the budgets and the greeting go, and
+/// the number-plus-note becomes one sentence that already has the comparison
+/// in it. The lowest-risk option: nothing new to learn.
+private struct TodayPrunedLab: View {
+    @State private var moment = LabMoment.inBed
+
+    private let range = 600...840   // 10AM – 2PM
+    private let chartHeight: CGFloat = 230
+
+    var body: some View {
+        LabFixedScreen(notes: notes) {
+            VStack(alignment: .leading, spacing: 0) {
+                LabMomentPicker(moment: $moment)
+                LabDateLine().padding(.top, 14)
+                chart.padding(.top, 16)
+                Spacer(minLength: 12)
+                LabSentence(text: LabToday.sentence(moment))
+                Spacer(minLength: 18)
+            }
+        } bottom: {
+            LabCTA(title: LabToday.cta(moment)).padding(.horizontal, 22).padding(.bottom, 10)
+        }
+    }
+
+    private var chart: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                LabLabel("This week")
+                Spacer()
+                LabLabel("All mornings ›", color: .primary)
+            }
+            HStack(alignment: .top, spacing: 6) {
+                LabClockGrid(range: range, height: chartHeight).labels
+                ZStack(alignment: .top) {
+                    LabClockGrid(range: range, height: chartHeight)
+                    HStack(alignment: .top, spacing: 0) {
+                        ForEach(Array(LabToday.week.enumerated()), id: \.offset) { index, morning in
+                            let isToday = index == LabToday.week.count - 1
+                            if isToday {
+                                LabColumn.today(moment, range: range, height: chartHeight, tint: labTint)
+                            } else {
+                                LabColumn(goal: LabToday.goal, wake: morning.wake, start: morning.start, end: morning.start + morning.routine, range: range, height: chartHeight, tint: labTint, faded: true)
+                            }
+                        }
+                    }
+                }
+            }
+            HStack(spacing: 0) {
+                Color.clear.frame(width: 40, height: 1)
+                ForEach(Array(LabToday.week.enumerated()), id: \.offset) { index, morning in
+                    Text(index == LabToday.week.count - 1 ? "TODAY" : "\(morning.day)")
+                        .font(.system(size: 9, weight: index == LabToday.week.count - 1 ? .bold : .medium))
+                        .foregroundStyle(index == LabToday.week.count - 1 ? .primary : .tertiary)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        .padding(12)
+        .overlay(labBox)
+    }
+
+    private var notes: LabNotes {
+        LabNotes(
+            title: "F · Pruned",
+            idea: "Keep the week chart, cut everything else: no greeting, no stopwatch, no budgets. One sentence replaces the number and its note, with the comparison to usual written into it.",
+            pros: [
+                "Nothing new to learn — the mark is the same one History uses.",
+                "The sentence does what the 50pt number pretended to: tells you where you stand and what to do.",
+                "Half the screen is white. It reads at a glance.",
+            ],
+            cons: [
+                "The chart still needs decoding (clock, five marks) and still leads the page.",
+                "A bad week is still a wall of long dotted lines before you have done anything.",
+                "The budgets are gone with nowhere to go yet — they would need a home on History.",
+            ],
+            take: "The safe cut. If the chart is the thing you actually look at in the morning, this is the answer; if you don't, it is still the wrong headline."
+        )
+    }
+}
+
+// MARK: - Today G · Receipt lines
+
+/// The morning printed as a receipt, one line per moment: WOKE, STARTED,
+/// ROUTINE. Lines not yet reached are blank; the current one ticks; each
+/// finished line carries its verdict against usual in small type under the
+/// value. The week is a row of seven marks, not a chart. The brand's own
+/// idiom — the Fake Receipt face, hard rules — doing the page's work.
+private struct TodayReceiptLinesLab: View {
+    @State private var moment = LabMoment.inBed
+
+    var body: some View {
+        LabFixedScreen(notes: notes) {
+            VStack(alignment: .leading, spacing: 0) {
+                LabMomentPicker(moment: $moment)
+                LabDateLine().padding(.top, 14)
+                receipt.padding(.top, 22)
+                Spacer(minLength: 12)
+                weekRow
+                Spacer(minLength: 12)
+                LabSentence(text: LabToday.sentence(moment))
+                Spacer(minLength: 18)
+            }
+        } bottom: {
+            LabCTA(title: LabToday.cta(moment)).padding(.horizontal, 22).padding(.bottom, 10)
+        }
+    }
+
+    private var receipt: some View {
+        VStack(spacing: 0) {
+            line("Woke",
+                 value: moment == .inBed ? nil : Lab.clock(LabToday.wake),
+                 live: moment == .inBed ? LabToday.now(.inBed) - LabToday.goal : nil,
+                 liveLabel: "past goal",
+                 verdict: moment == .inBed ? nil : "52 MIN LATE · USUALLY 22",
+                 color: Lab.amberText)
+            ReceiptRule()
+            line("Started",
+                 value: [.running, .done].contains(moment) ? Lab.clock(LabToday.start) : nil,
+                 live: moment == .up ? LabToday.now(.up) - LabToday.wake : nil,
+                 liveLabel: "since waking",
+                 verdict: [.running, .done].contains(moment) ? "48 MIN AFTER WAKING · USUALLY 33" : nil,
+                 color: Lab.amberText)
+            ReceiptRule()
+            line("Routine",
+                 value: moment == .done ? "24:00" : nil,
+                 live: moment == .running ? LabToday.now(.running) - LabToday.start : nil,
+                 liveLabel: "done by 1:04",
+                 verdict: moment == .done ? "3 MIN QUICKER THAN USUAL" : nil,
+                 color: labTint)
+        }
+    }
+
+    /// One receipt line. A blank value is printed as a dash in the tertiary
+    /// ink — the line is coming, not missing.
+    private func line(_ label: String, value: String?, live: Int?, liveLabel: String, verdict: String?, color: Color) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label.uppercased())
+                .font(analogFont(17))
+                .foregroundStyle(value == nil && live == nil ? Color(.tertiaryLabel) : .primary)
+            Spacer()
+            VStack(alignment: .trailing, spacing: 3) {
+                if let value {
+                    Text(value).font(analogFont(30)).monospacedDigit()
+                } else if let live {
+                    LabTicker(from: live * 60) { text in
+                        Text(text).font(analogFont(30)).monospacedDigit().foregroundStyle(color)
+                    }
+                } else {
+                    Text("—").font(analogFont(30)).foregroundStyle(Color(.tertiaryLabel))
+                }
+                if let verdict {
+                    LabLabel(verdict, color: color, size: 9)
+                } else if live != nil {
+                    LabLabel(liveLabel, color: .secondary, size: 9)
+                }
+            }
+        }
+        .padding(.vertical, 12)
+        .contentTransition(.identity)
+    }
+
+    /// Seven marks for seven days: filled when you were up by the goal,
+    /// hollow when late, dashed when nothing was logged, today ringed.
+    private var weekRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                LabLabel("This week")
+                Spacer()
+                LabLabel("\(LabToday.streak) day streak", color: .primary)
+            }
+            HStack(spacing: 0) {
+                ForEach(Array(LabToday.week.enumerated()), id: \.offset) { index, morning in
+                    let isToday = index == LabToday.week.count - 1
+                    let onTime = morning.wake <= LabToday.goal
+                    VStack(spacing: 6) {
+                        ZStack {
+                            if isToday && moment == .inBed {
+                                Circle().strokeBorder(Color.primary, style: StrokeStyle(lineWidth: 1.5, dash: [3, 3])).frame(width: 18, height: 18)
+                            } else if onTime {
+                                Circle().fill(labTint).frame(width: 18, height: 18)
+                            } else {
+                                Circle().strokeBorder(Lab.amber, lineWidth: 2).frame(width: 18, height: 18)
+                            }
+                            if isToday {
+                                Circle().strokeBorder(Color.primary.opacity(0.5), lineWidth: 1).frame(width: 26, height: 26)
+                            }
+                        }
+                        Text(String(morning.weekday.prefix(1)))
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(isToday ? .primary : .tertiary)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        .padding(12)
+        .overlay(labBox)
+    }
+
+    private var notes: LabNotes {
+        LabNotes(
+            title: "G · Receipt",
+            idea: "Print the morning as three receipt lines — WOKE, STARTED, ROUTINE — filling in as they happen. The line you are on ticks; a finished line carries its verdict against usual in small type. The week is seven marks, not a chart.",
+            pros: [
+                "It is the brand: the receipt face and the hard rules doing the page's own work.",
+                "Reads top to bottom as a checklist. You can see what is left.",
+                "Every number comes with its comparison, so 11:52 is never a bare fact.",
+                "Fits on one screen with room to spare, in every state.",
+            ],
+            cons: [
+                "No shape of the week — you get on-time / late per day, not how late.",
+                "Three verdicts in amber on a bad morning is still three tellings-off.",
+                "The routine line duplicates what the Run tab and the summary already show.",
+            ],
+            take: "My favourite for a landing page: it answers 'where am I in the morning' before anything else, and the week is a glance, not a study."
+        )
+    }
+}
+
+// MARK: - Today H · Habit
+
+/// The landing page is about the habit, not the metrics: four weeks of
+/// mornings as dots, today's the big one, alive. On time is the theme colour,
+/// late is amber, missed is a hollow grey. The streak is the headline. One
+/// sentence about now, and the button. Everything measured lives in History.
+private struct TodayHabitLab: View {
+    @State private var moment = LabMoment.inBed
+    @State private var pulse = false
+
+    private enum Day { case onTime, late, missed, blank }
+
+    /// Four weeks, Monday first, ending on today (Sat). The first two weeks
+    /// predate the data and are drawn blank.
+    private var grid: [[Day]] {
+        var days: [Day] = Array(repeating: .blank, count: 14)
+        // Sep 7 (Mon) … Sep 19 (Sat), then Sun blank to finish the row.
+        for morning in Lab.mornings.dropLast() {
+            days.append(morning.wake <= LabToday.goal ? .onTime : .late)
+        }
+        days.append(.blank) // today, drawn separately
+        days.append(.blank) // Sunday still to come
+        return stride(from: 0, to: days.count, by: 7).map { Array(days[$0..<min($0 + 7, days.count)]) }
+    }
+
+    var body: some View {
+        LabFixedScreen(notes: notes) {
+            VStack(alignment: .leading, spacing: 0) {
+                LabMomentPicker(moment: $moment)
+                LabDateLine().padding(.top, 14)
+                headline.padding(.top, 22)
+                dots.padding(.top, 20)
+                Spacer(minLength: 12)
+                LabSentence(text: LabToday.sentence(moment))
+                Spacer(minLength: 18)
+            }
+        } bottom: {
+            LabCTA(title: LabToday.cta(moment)).padding(.horizontal, 22).padding(.bottom, 10)
+        }
+        .onAppear { pulse = true }
+    }
+
+    private var headline: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text("\(LabToday.streak)")
+                .font(digitFont(56))
+            VStack(alignment: .leading, spacing: 2) {
+                LabLabel("mornings in a row", color: .primary)
+                LabLabel("best 6 · all mornings ›")
+            }
+        }
+    }
+
+    private var dots: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 0) {
+                ForEach(["M", "T", "W", "T", "F", "S", "S"], id: \.self) { d in
+                    Text(d).font(.system(size: 9, weight: .semibold)).foregroundStyle(.tertiary).frame(maxWidth: .infinity)
+                }
+            }
+            ForEach(Array(grid.enumerated()), id: \.offset) { row, week in
+                HStack(spacing: 0) {
+                    ForEach(Array(week.enumerated()), id: \.offset) { col, day in
+                        let isToday = row == grid.count - 1 && col == 5
+                        ZStack {
+                            if isToday {
+                                todayDot
+                            } else {
+                                dot(day)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 30)
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .overlay(labBox)
+    }
+
+    private func dot(_ day: Day) -> some View {
+        Group {
+            switch day {
+            case .onTime: Circle().fill(labTint)
+            case .late: Circle().fill(Lab.amber.opacity(0.85))
+            case .missed: Circle().strokeBorder(Color(.tertiaryLabel), lineWidth: 1.5)
+            case .blank: Circle().fill(Color.primary.opacity(0.06))
+            }
+        }
+        .frame(width: 16, height: 16)
+    }
+
+    /// Today: hollow and breathing in bed, filled amber once up late, the
+    /// theme colour once the routine is done.
+    private var todayDot: some View {
+        ZStack {
+            switch moment {
+            case .inBed:
+                Circle().strokeBorder(Color.primary, lineWidth: 2)
+                    .frame(width: 24, height: 24)
+                    .opacity(pulse ? 0.35 : 1)
+                    .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: pulse)
+            case .up, .running:
+                Circle().fill(Lab.amber.opacity(0.85)).frame(width: 24, height: 24)
+                Circle().strokeBorder(Color.primary, lineWidth: 1.5).frame(width: 30, height: 30)
+            case .done:
+                Circle().fill(Lab.amber.opacity(0.85)).frame(width: 24, height: 24)
+                Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+            }
+        }
+    }
+
+    private var notes: LabNotes {
+        LabNotes(
+            title: "H · Habit",
+            idea: "Lead with the streak and a month of dots — on time, late, missed — with today's dot alive. The numbers move to History. One sentence says where you are; the button says what to do.",
+            pros: [
+                "Consistency is the thing the app is for, and this shows it directly: a month at a glance.",
+                "Cheap to read half-awake: colour and a count, no clock, no axis.",
+                "A late morning is one amber dot among many, not a wall of red.",
+            ],
+            cons: [
+                "Loses all magnitude: 5 minutes late and 90 minutes late are the same dot.",
+                "Two states of 'late' (late but ran the routine, late and skipped it) need a mark each or the grid lies.",
+                "The activation and routine-length stories vanish from the landing page entirely.",
+            ],
+            take: "Strongest as a feeling, weakest as information. Right if the landing page's only job is 'keep going'; pair it with a proper History."
+        )
+    }
+}
+
+// MARK: - Today I · Today against usual
+
+/// Only today's mark, drawn large, with a faded 'usual' column beside it —
+/// the seven-morning average wake, start and end. The comparison is spatial:
+/// today's cap below usual's is a late morning, a shorter box is a quicker
+/// routine. Clock at the left, each of today's marks labelled in place. The
+/// week and the budgets are History's.
+private struct TodayVersusUsualLab: View {
+    @State private var moment = LabMoment.inBed
+
+    private let range = 630...810   // 10:30 – 1:30
+    private let height: CGFloat = 290
+
+    private func y(_ minutes: Int) -> CGFloat {
+        CGFloat(minutes - range.lowerBound) / CGFloat(range.upperBound - range.lowerBound) * height
+    }
+
+    var body: some View {
+        LabFixedScreen(notes: notes) {
+            VStack(alignment: .leading, spacing: 0) {
+                LabMomentPicker(moment: $moment)
+                LabDateLine().padding(.top, 14)
+                figure.padding(.top, 16)
+                Spacer(minLength: 12)
+                LabSentence(text: LabToday.sentence(moment))
+                Spacer(minLength: 18)
+            }
+        } bottom: {
+            LabCTA(title: LabToday.cta(moment)).padding(.horizontal, 22).padding(.bottom, 10)
+        }
+    }
+
+    private var figure: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                LabLabel("Today")
+                Spacer()
+                LabLabel("Usual = last 7 · all mornings ›")
+            }
+            HStack(alignment: .top, spacing: 6) {
+                LabClockGrid(range: range, height: height).labels
+                ZStack(alignment: .topLeading) {
+                    LabClockGrid(range: range, height: height)
+                    HStack(alignment: .top, spacing: 0) {
+                        Spacer(minLength: 0)
+                        // Usual, faded, with its own small labels.
+                        LabColumn(goal: LabToday.goal, wake: LabToday.usualWake, start: LabToday.usualWake + LabToday.usualLag, end: LabToday.usualWake + LabToday.usualLag + LabToday.usualRoutine, range: range, height: height, tint: labTint, faded: true)
+                            .frame(width: 70)
+                        Spacer(minLength: 0)
+                        LabColumn.today(moment, range: range, height: height, tint: labTint)
+                            .frame(width: 70)
+                        Spacer(minLength: 0)
+                    }
+                    annotations
+                }
+            }
+            HStack(spacing: 0) {
+                Color.clear.frame(width: 40, height: 1)
+                Spacer(minLength: 0)
+                LabLabel("Usual", color: Color(.tertiaryLabel), size: 9).frame(width: 70)
+                Spacer(minLength: 0)
+                LabLabel("Today", color: .primary, size: 9).frame(width: 70)
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(12)
+        .overlay(labBox)
+    }
+
+    /// Today's numbers floated beside today's marks. Their x is the right
+    /// edge of the plot; the geometry here is by eye, which is what a
+    /// mockup is for.
+    private var annotations: some View {
+        // A GeometryReader is greedy; pinned to the plot's height so it
+        // cannot stretch the card to the bottom of the screen.
+        GeometryReader { geo in
+            let x = geo.size.width * 0.5 + 35 + 44
+            Group {
+                switch moment {
+                case .inBed:
+                    chip("+12 MIN", color: Lab.amberText, x: x, y: y(LabToday.now(.inBed)))
+                case .up:
+                    chip("11:52 · +52", color: Lab.amberText, x: x, y: y(LabToday.wake))
+                case .running:
+                    chip("11:52 · +52", color: Lab.amberText, x: x, y: y(LabToday.wake))
+                    chip("48M", color: Lab.lagGrey, x: x, y: (y(LabToday.wake) + y(LabToday.start)) / 2)
+                case .done:
+                    chip("11:52 · +52", color: Lab.amberText, x: x, y: y(LabToday.wake))
+                    chip("48M", color: Lab.lagGrey, x: x, y: (y(LabToday.wake) + y(LabToday.start)) / 2)
+                    chip("24M", color: labTint, x: x, y: (y(LabToday.start) + y(LabToday.end)) / 2)
+                }
+            }
+        }
+        .frame(height: height)
+    }
+
+    private func chip(_ text: String, color: Color, x: CGFloat, y: CGFloat) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .bold))
+            .tracking(1)
+            .foregroundStyle(color)
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(Color(.systemBackground).opacity(0.9), in: Capsule())
+            .fixedSize()
+            .position(x: x, y: y)
+    }
+
+    private var notes: LabNotes {
+        LabNotes(
+            title: "I · Today vs usual",
+            idea: "One column for today, one faded column for your usual morning, on the same clock. Late is 'lower than usual', quick is 'shorter box' — a comparison you see rather than compute. The week itself is one tap away.",
+            pros: [
+                "The mark is the same one History uses, so nothing new to learn — and at this size it finally reads without squinting.",
+                "The comparison is built into the picture; no baseline table, no verdict text needed.",
+                "A bad morning is one column a little lower than another, not a red screen.",
+            ],
+            cons: [
+                "Still a clock chart at 6:30am — the axis has to be read.",
+                "No trend: you cannot tell if the week has been getting better.",
+                "'Usual' hides a lot: a wild week averages to a calm column.",
+            ],
+            take: "The honest middle: keeps the app's one drawing, drops everything that repeated it. Pairs naturally with G's sentence and History's week."
+        )
+    }
+}
+
+// MARK: - Today, third round · shared
+
+/// Mock budget spend, chosen so the bars show all three states across the
+/// morning: healthy, low, and empty.
+private enum LabBudget {
+    static let total = 60
+    static let snoozeBefore = 10
+    static let activationBefore = 8
+    static func snoozeToday(_ m: LabMoment) -> Int { m == .inBed ? 12 : 52 }
+    static func activationToday(_ m: LabMoment) -> Int {
+        switch m {
+        case .inBed: return 0
+        case .up: return 18
+        case .running, .done: return 48
+        }
+    }
+    static let red = Color(hex: 0xDB2118)
+}
+
+/// A weekly allowance as a health bar. Full at the start of the week, it
+/// drains as minutes are spent. The solid part is what is left; the pale
+/// part beside it is what today has taken (the "damage" a game shows before
+/// it fades); the track is what earlier days took. The theme colour while
+/// healthy, amber under a quarter, red and empty once it is gone.
+private struct LabHealthBar: View {
+    let title: String
+    let before: Int
+    let today: Int
+    var budget = LabBudget.total
+    var live = false
+    var large = false
+    @State private var pulse = false
+
+    private var remaining: Int { budget - before - today }
+    private var startFraction: Double { max(0, Double(budget - before)) / Double(budget) }
+    private var nowFraction: Double { max(0, Double(remaining)) / Double(budget) }
+    private var color: Color {
+        if remaining <= 0 { return LabBudget.red }
+        if nowFraction < 0.25 { return Lab.amber }
+        return labTint
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: large ? 8 : 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                LabLabel(title, color: live ? .primary : .secondary, size: large ? 11 : 9)
+                if live {
+                    Text("NOW")
+                        .font(.system(size: 7.5, weight: .bold)).tracking(1)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5).padding(.vertical, 1.5)
+                        .background(color, in: Capsule())
+                }
+                Spacer()
+                if large {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(remaining > 0 ? "\(remaining)" : "0").font(analogFont(24)).monospacedDigit()
+                            .foregroundStyle(remaining <= 0 ? LabBudget.red : .primary)
+                        LabLabel(remaining > 0 ? "min left" : "empty · \(-remaining) over", color: remaining <= 0 ? LabBudget.red : .secondary, size: 9)
+                    }
+                } else {
+                    LabLabel(remaining > 0 ? "\(remaining) min left" : remaining == 0 ? "empty" : "empty · \(-remaining) over",
+                             color: remaining <= 0 ? LabBudget.red : .primary, size: 9)
+                }
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(Color.primary.opacity(0.07))
+                    Rectangle().fill(color.opacity(0.25)).frame(width: geo.size.width * startFraction)
+                    Rectangle().fill(color).frame(width: geo.size.width * nowFraction)
+                        .opacity(live && pulse ? 0.55 : 1)
+                        .animation(live ? .easeInOut(duration: 1.1).repeatForever(autoreverses: true) : .default, value: pulse)
+                    // Ten-minute notches, in the app's dot-matrix register.
+                    HStack(spacing: 0) {
+                        ForEach(0..<(budget / 10), id: \.self) { i in
+                            Color.clear.overlay(alignment: .trailing) {
+                                if i < budget / 10 - 1 { Rectangle().fill(Color(.systemBackground)).frame(width: 2) }
+                            }
+                        }
+                    }
+                }
+            }
+            .frame(height: large ? 18 : 10)
+            .clipShape(RoundedRectangle(cornerRadius: 2))
+        }
+        .onAppear { pulse = true }
+    }
+}
+
+/// History's readout stat: tracked grey label, receipt-face value, and here
+/// an optional small note under it for the comparison.
+private struct LabReadoutStat: View {
+    let label: String
+    let value: String
+    var color: Color = .primary
+    var note: String? = nil
+    var noteColor: Color = .secondary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label.uppercased())
+                .font(.system(size: 9, weight: .semibold)).tracking(1.6)
+                .foregroundStyle(.tertiary)
+            Text(value)
+                .font(analogFont(21)).monospacedDigit()
+                .foregroundStyle(color)
+                .lineLimit(1).minimumScaleFactor(0.7)
+            Text(note ?? " ")
+                .font(.system(size: 8.5, weight: .semibold)).tracking(1.1)
+                .foregroundStyle(noteColor)
+                .lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentTransition(.identity)
+    }
+}
+
+/// History's mark label: a small bordered chip beside the mark it names.
+private func labMarkChip(_ text: String, color: Color) -> some View {
+    Text(text)
+        .font(.system(size: 9, weight: .bold)).tracking(0.8)
+        .foregroundStyle(color)
+        .padding(.horizontal, 5).padding(.vertical, 2)
+        .background(Color(.systemBackground), in: Capsule())
+        .overlay(Capsule().strokeBorder(color.opacity(0.35), lineWidth: 1))
+        .fixedSize()
+}
+
+/// Today's three figures in each moment, with the comparison to usual.
+private enum LabFigures {
+    struct Figure { let value: String; let note: String?; let color: Color; let noteColor: Color }
+
+    static func woke(_ m: LabMoment) -> Figure {
+        m == .inBed
+            ? Figure(value: "+12 MIN", note: "USUALLY UP 11:22", color: Lab.amberText, noteColor: .secondary)
+            : Figure(value: "11:52", note: "30 LATER THAN USUAL", color: .primary, noteColor: Lab.amberText)
+    }
+    static func toStart(_ m: LabMoment) -> Figure {
+        switch m {
+        case .inBed: return Figure(value: "—", note: "USUALLY 33 MIN", color: Color(.tertiaryLabel), noteColor: .secondary)
+        case .up: return Figure(value: "18 MIN", note: "SO FAR · USUALLY 33", color: .primary, noteColor: .secondary)
+        case .running, .done: return Figure(value: "48 MIN", note: "15 LONGER THAN USUAL", color: .primary, noteColor: Lab.amberText)
+        }
+    }
+    static func routine(_ m: LabMoment) -> Figure {
+        switch m {
+        case .inBed, .up: return Figure(value: "—", note: "USUALLY 27 MIN", color: Color(.tertiaryLabel), noteColor: .secondary)
+        case .running: return Figure(value: "10 MIN", note: "DONE BY 1:04", color: labTint, noteColor: .secondary)
+        case .done: return Figure(value: "24 MIN", note: "3 QUICKER THAN USUAL", color: labTint, noteColor: labTint)
+        }
+    }
+}
+
+/// The readout box as History draws it: a title row, then the three stats.
+private struct LabTodayReadout<Trailing: View>: View {
+    let moment: LabMoment
+    var title = "TODAY"
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(title).font(.system(size: 11, weight: .semibold)).tracking(1.6)
+                Spacer()
+                trailing
+            }
+            .frame(height: 24)
+            HStack(alignment: .top, spacing: 12) {
+                stat("Woke", LabFigures.woke(moment))
+                stat("To start", LabFigures.toStart(moment))
+                stat("Routine", LabFigures.routine(moment))
+            }
+        }
+        .padding(14)
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.14), lineWidth: 1))
+    }
+
+    private func stat(_ label: String, _ f: LabFigures.Figure) -> some View {
+        LabReadoutStat(label: label, value: f.value, color: f.color, note: f.note, noteColor: f.noteColor)
+    }
+}
+
+/// Today's labelled marks, History style, for a column of the given width.
+private func labTodayChips(_ m: LabMoment, y: (Int) -> CGFloat, side: CGFloat) -> some View {
+    ZStack(alignment: .top) {
+        switch m {
+        case .inBed:
+            labMarkChip("+12M", color: Lab.amberText).offset(x: side, y: y(LabToday.now(.inBed)) - 8)
+        case .up:
+            labMarkChip("11:52", color: .primary).offset(x: side, y: y(LabToday.wake) - 8)
+            labMarkChip("18M", color: Lab.lagGrey).offset(x: side, y: (y(LabToday.wake) + y(LabToday.now(.up))) / 2 - 8)
+        case .running:
+            labMarkChip("11:52", color: .primary).offset(x: side, y: y(LabToday.wake) - 8)
+            labMarkChip("48M", color: Lab.lagGrey).offset(x: side, y: (y(LabToday.wake) + y(LabToday.start)) / 2 - 8)
+            labMarkChip("10M", color: labTint).offset(x: side, y: (y(LabToday.start) + y(LabToday.now(.running))) / 2 - 8)
+        case .done:
+            labMarkChip("11:52", color: .primary).offset(x: side, y: y(LabToday.wake) - 8)
+            labMarkChip("48M", color: Lab.lagGrey).offset(x: side, y: (y(LabToday.wake) + y(LabToday.start)) / 2 - 8)
+            labMarkChip("24M", color: labTint).offset(x: side, y: (y(LabToday.start) + y(LabToday.end)) / 2 - 8)
+        }
+    }
+}
+
+private func labBudgets(_ m: LabMoment, large: Bool = false) -> some View {
+    VStack(spacing: large ? 18 : 12) {
+        LabHealthBar(title: "Snooze", before: LabBudget.snoozeBefore, today: LabBudget.snoozeToday(m), live: m == .inBed, large: large)
+        LabHealthBar(title: "Activation", before: LabBudget.activationBefore, today: LabBudget.activationToday(m), live: m == .up, large: large)
+    }
+}
+
+// MARK: - Today J · Today vs usual, in History's words
+
+/// I, retold: the readout box leads (today's three figures, each with its
+/// difference from usual under it), then today's column beside a faded usual
+/// column with History's chips on both, then the two health bars.
+private struct TodayUsualReadoutLab: View {
+    @State private var moment = LabMoment.inBed
+    private let range = 630...810
+    private let height: CGFloat = 220
+
+    private func y(_ minutes: Int) -> CGFloat {
+        CGFloat(minutes - range.lowerBound) / CGFloat(range.upperBound - range.lowerBound) * height
+    }
+
+    var body: some View {
+        LabFixedScreen(notes: notes) {
+            VStack(alignment: .leading, spacing: 0) {
+                LabMomentPicker(moment: $moment)
+                LabDateLine().padding(.top, 14)
+                LabTodayReadout(moment: moment) {
+                    LabLabel("vs last 7", color: .secondary, size: 9)
+                }
+                .padding(.top, 14)
+                chart.padding(.top, 12)
+                Spacer(minLength: 10)
+                labBudgets(moment)
+                Spacer(minLength: 14)
+            }
+        } bottom: {
+            LabCTA(title: LabToday.cta(moment)).padding(.horizontal, 22).padding(.bottom, 10)
+        }
+    }
+
+    private var chart: some View {
+        HStack(alignment: .top, spacing: 6) {
+            LabClockGrid(range: range, height: height).labels
+            ZStack(alignment: .top) {
+                LabClockGrid(range: range, height: height)
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    LabColumn(goal: LabToday.goal, wake: LabToday.usualWake, start: LabToday.usualWake + LabToday.usualLag,
+                              end: LabToday.usualWake + LabToday.usualLag + LabToday.usualRoutine, range: range, height: height, tint: labTint, faded: true)
+                        .frame(width: 60)
+                        .overlay(alignment: .top) {
+                            ZStack(alignment: .top) {
+                                labMarkChip("11:22", color: Color(.tertiaryLabel)).offset(x: -52, y: y(LabToday.usualWake) - 8)
+                                labMarkChip("33M", color: Color(.tertiaryLabel)).offset(x: -52, y: y(LabToday.usualWake + 16) - 8)
+                                labMarkChip("27M", color: Color(.tertiaryLabel)).offset(x: -52, y: y(LabToday.usualWake + 46) - 8)
+                            }
+                        }
+                    Spacer(minLength: 0)
+                    LabColumn.today(moment, range: range, height: height, tint: labTint)
+                        .frame(width: 60)
+                        .overlay(alignment: .top) { labTodayChips(moment, y: y, side: 54) }
+                    Spacer(minLength: 0)
+                }
+                VStack {
+                    Spacer()
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        LabLabel("Usual", color: Color(.tertiaryLabel), size: 8).frame(width: 60)
+                        Spacer(minLength: 0)
+                        LabLabel("Today", color: .primary, size: 8).frame(width: 60)
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+            .frame(height: height)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var notes: LabNotes {
+        LabNotes(
+            title: "J · Usual, History's words",
+            idea: "Today vs usual, but spoken the way History speaks: the same boxed readout (WOKE · TO START · ROUTINE) with each figure's difference from usual underneath, and History's little labels on the marks. The budgets become health bars that drain from full.",
+            pros: [
+                "One vocabulary across the app — learn the readout on History, read it here.",
+                "Every number arrives with its comparison, so nothing needs working out.",
+                "Health bars say 'you have 38 minutes of slack left this week', which is a reason to get up, not a bill.",
+            ],
+            cons: [
+                "Three layers — readout, chart, bars — is still a lot for 6:30am.",
+                "The chart now mostly repeats the readout in pictures.",
+            ],
+            take: "The most complete of the three. If it still feels busy, the chart is the thing to cut — which is L."
+        )
+    }
+}
+
+// MARK: - Today K · The week, History's chart
+
+/// The History chart itself at seven days, today growing on the end with its
+/// marks labelled, under History's readout — today's figures, compared with
+/// the 7- or 30-day average by the same pills History uses. Health bars below.
+private struct TodayWeekReadoutLab: View {
+    @State private var moment = LabMoment.inBed
+    @State private var period = "7 DAYS"
+    private let range = 600...840
+    private let height: CGFloat = 190
+
+    private func y(_ minutes: Int) -> CGFloat {
+        CGFloat(minutes - range.lowerBound) / CGFloat(range.upperBound - range.lowerBound) * height
+    }
+
+    var body: some View {
+        LabFixedScreen(notes: notes) {
+            VStack(alignment: .leading, spacing: 0) {
+                LabMomentPicker(moment: $moment)
+                LabDateLine().padding(.top, 14)
+                LabTodayReadout(moment: moment, title: "TODAY VS") { pills }
+                    .padding(.top, 14)
+                chart.padding(.top, 12)
+                Spacer(minLength: 10)
+                labBudgets(moment)
+                Spacer(minLength: 14)
+            }
+        } bottom: {
+            LabCTA(title: LabToday.cta(moment)).padding(.horizontal, 22).padding(.bottom, 10)
+        }
+    }
+
+    private var pills: some View {
+        HStack(spacing: 4) {
+            ForEach(["7 DAYS", "30 DAYS"], id: \.self) { option in
+                let isOn = option == period
+                Button { period = option } label: {
+                    Text(option)
+                        .font(.system(size: 9, weight: .semibold)).tracking(1.1)
+                        .foregroundStyle(isOn ? Color(.systemBackground) : Color.primary.opacity(0.55))
+                        .padding(.horizontal, 7).padding(.vertical, 4)
+                        .background {
+                            if isOn { Capsule().fill(Color.primary) }
+                            else { Capsule().strokeBorder(Color.primary.opacity(0.25), lineWidth: 1) }
+                        }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var chart: some View {
+        VStack(spacing: 6) {
+            HStack(alignment: .top, spacing: 6) {
+                LabClockGrid(range: range, height: height).labels
+                ZStack(alignment: .top) {
+                    LabClockGrid(range: range, height: height)
+                    HStack(alignment: .top, spacing: 0) {
+                        ForEach(Array(LabToday.week.enumerated()), id: \.offset) { index, morning in
+                            if index == LabToday.week.count - 1 {
+                                LabColumn.today(moment, range: range, height: height, tint: labTint)
+                                    .overlay(alignment: .top) { labTodayChips(moment, y: y, side: -34) }
+                            } else {
+                                LabColumn(goal: LabToday.goal, wake: morning.wake, start: morning.start, end: morning.start + morning.routine,
+                                          range: range, height: height, tint: labTint, faded: true)
+                            }
+                        }
+                    }
+                }
+                .frame(height: height)
+            }
+            HStack(spacing: 0) {
+                Color.clear.frame(width: 40, height: 1)
+                ForEach(Array(LabToday.week.enumerated()), id: \.offset) { index, morning in
+                    let isToday = index == LabToday.week.count - 1
+                    Text(isToday ? "TODAY" : "\(morning.day)")
+                        .font(.system(size: 9, weight: isToday ? .bold : .medium))
+                        .foregroundStyle(isToday ? .primary : .tertiary)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
+    private var notes: LabNotes {
+        LabNotes(
+            title: "K · Week, History's chart",
+            idea: "History's own chart and readout, cut to a week: the same box on top (today's figures against a 7- or 30-day average, the same pills), the same marks and chips below with today labelled. Budgets as health bars.",
+            pros: [
+                "Today is literally a page of History with today on the end — nothing to learn twice.",
+                "Keeps the shape of the week, which J and L give up.",
+                "The pills answer 'compared with what' in the place you'd look for it.",
+            ],
+            cons: [
+                "The most to read of the three.",
+                "Seven faded columns plus today's is still a chart that needs decoding at 6:30.",
+            ],
+            take: "Right if you actually use the week on waking. If you only glance at the week on History, pick J or L."
+        )
+    }
+}
+
+// MARK: - Today L · Health bars first
+
+/// The budgets lead. Two large health bars — the one draining now marked —
+/// then History's readout as a two-row table, TODAY against USUAL, and the
+/// button. No chart at all: the page answers "how much slack is left, and
+/// how is today going", and the drawing lives on History.
+private struct TodayHealthFirstLab: View {
+    @State private var moment = LabMoment.inBed
+
+    var body: some View {
+        LabFixedScreen(notes: notes) {
+            VStack(alignment: .leading, spacing: 0) {
+                LabMomentPicker(moment: $moment)
+                LabDateLine().padding(.top, 14)
+                LabLabel("This week's slack").padding(.top, 26)
+                labBudgets(moment, large: true).padding(.top, 14)
+                table.padding(.top, 30)
+                HStack {
+                    Spacer()
+                    LabLabel("All mornings ›", color: .primary, size: 9)
+                }
+                .padding(.top, 10)
+                Spacer(minLength: 14)
+            }
+        } bottom: {
+            LabCTA(title: LabToday.cta(moment)).padding(.horizontal, 22).padding(.bottom, 10)
+        }
+    }
+
+    private var table: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Color.clear.frame(width: 58, height: 1)
+                header("Woke"); header("To start"); header("Routine")
+            }
+            ReceiptRule()
+            HStack(alignment: .firstTextBaseline) {
+                rowLabel("Today", color: .primary)
+                value(LabFigures.woke(moment))
+                value(LabFigures.toStart(moment))
+                value(LabFigures.routine(moment))
+            }
+            HStack(alignment: .firstTextBaseline) {
+                rowLabel("Usual", color: Color(.tertiaryLabel))
+                plain("11:22"); plain("33 MIN"); plain("27 MIN")
+            }
+        }
+        .padding(14)
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.14), lineWidth: 1))
+    }
+
+    private func header(_ text: String) -> some View {
+        Text(text.uppercased()).font(.system(size: 9, weight: .semibold)).tracking(1.6)
+            .foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .leading)
+    }
+    private func rowLabel(_ text: String, color: Color) -> some View {
+        Text(text.uppercased()).font(.system(size: 9, weight: .semibold)).tracking(1.6)
+            .foregroundStyle(color).frame(width: 58, alignment: .leading)
+    }
+    private func value(_ f: LabFigures.Figure) -> some View {
+        Text(f.value).font(analogFont(19)).monospacedDigit().foregroundStyle(f.color)
+            .lineLimit(1).minimumScaleFactor(0.6).frame(maxWidth: .infinity, alignment: .leading)
+            .contentTransition(.identity)
+    }
+    private func plain(_ text: String) -> some View {
+        Text(text).font(analogFont(19)).monospacedDigit().foregroundStyle(Color(.tertiaryLabel))
+            .lineLimit(1).minimumScaleFactor(0.6).frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var notes: LabNotes {
+        LabNotes(
+            title: "L · Health bars first",
+            idea: "Lead with the two things that can still change this morning: how much snooze and activation slack is left this week, as draining health bars. Then today against usual as a two-row table in History's register. No chart.",
+            pros: [
+                "The least to read. Two bars and six numbers.",
+                "The bars are the motivation: watching snooze drain from bed is a reason to get up — and it drains, it doesn't pile up a debt.",
+                "Today vs usual as a table is compared at a glance, column by column.",
+            ],
+            cons: [
+                "No picture of the morning or the week on the landing page at all.",
+                "On a bad week both bars are empty and red by Wednesday, and stay that way.",
+            ],
+            take: "The calmest. Pair it with History for the drawing. If the empty-by-Wednesday problem bites, the bars could reset daily instead of weekly."
+        )
     }
 }
 

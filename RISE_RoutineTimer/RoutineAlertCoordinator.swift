@@ -17,13 +17,14 @@ final class RoutineAlertCoordinator {
     private let alerts = RoutineAlerts()
     private let liveActivity = RoutineLiveActivityController()
     private let recordSession: (SessionResult) -> Void
-    /// Called with the run's start time, from whichever door it was started:
-    /// the Today tab, the Run tab or the Start intent.
-    private let runStarted: (Date) -> Void
+    /// Called with the run's start time and which routine it is, from
+    /// whichever door it was started: the Today tab, the Run tab or a Start
+    /// intent.
+    private let runStarted: (Date, RoutineKind) -> Void
 
     init(
         engine: RoutineEngine,
-        runStarted: @escaping (Date) -> Void = { _ in },
+        runStarted: @escaping (Date, RoutineKind) -> Void = { _, _ in },
         recordSession: @escaping (SessionResult) -> Void
     ) {
         self.engine = engine
@@ -62,7 +63,7 @@ final class RoutineAlertCoordinator {
             // Build the players and resolve the voice now, so the first
             // check mark of the morning is as cheap as the rest.
             alerts.warmUp()
-            runStarted(engine.routineStartDate ?? Date())
+            runStarted(engine.routineStartDate ?? Date(), engine.kind ?? .morning)
         case .resumed:
             syncNotifications()
         case .paused, .reset:
@@ -97,6 +98,11 @@ final class RoutineAlertCoordinator {
 
     private func syncNotifications() {
         let now = Date()
-        RoutineNotificationManager.schedule(engine.plannedAlerts(at: now), steps: engine.steps, now: now)
+        RoutineNotificationManager.schedule(
+            engine.plannedAlerts(at: now),
+            steps: engine.steps,
+            kind: engine.kind ?? .morning,
+            now: now
+        )
     }
 }

@@ -21,6 +21,8 @@ struct MorningChartsView: View {
     /// Opens the run that began at this moment (a session's identity).
     var onOpenRun: (Date) -> Void = { _ in }
 
+    private var kind: RoutineKind { metrics.kind }
+
     var body: some View {
         Group {
             MorningColumnsSection(metrics: metrics, now: now, onOpenRun: onOpenRun)
@@ -43,7 +45,8 @@ struct MorningChartsView: View {
                 .tracking(1.4)
                 .foregroundStyle(.secondary)
 
-                ForEach(MorningMetrics.Metric.allCases) { metric in
+                // The night has no activation row: you were already up.
+                ForEach(metrics.metrics) { metric in
                     Divider().gridCellUnsizedAxes(.horizontal)
                     GridRow {
                         Text(metric.title)
@@ -56,7 +59,7 @@ struct MorningChartsView: View {
 
                 Divider().gridCellUnsizedAxes(.horizontal)
                 GridRow {
-                    Text("Wake spread")
+                    Text(kind == .night ? "Start spread" : "Wake spread")
                         .font(.subheadline)
                         .gridColumnAlignment(.leading)
                     spreadValue(metrics.wakeConsistencyMinutes(days: 7, now: now))
@@ -67,7 +70,9 @@ struct MorningChartsView: View {
         } header: {
             Text("Rolling baselines")
         } footer: {
-            Text("Spread is how much your wake time varies. A small spread means the habit is stable, whatever the average says.")
+            Text(kind == .night
+                 ? "Snooze is how late the routine began against your night goal. Spread is how much that start time varies — a small spread means the habit is stable, whatever the average says."
+                 : "Spread is how much your wake time varies. A small spread means the habit is stable, whatever the average says.")
         }
     }
 
@@ -124,24 +129,63 @@ struct MorningChartsView: View {
 
 // MARK: - The mornings chart
 
+/// The window the readout averages over when no day is selected. It is not
+/// the page: the chart pages by fortnight, but "how am I doing lately" is a
+/// question about the last week or month, whichever fortnight is showing.
+nonisolated enum HistoryAveragePeriod: String, CaseIterable, Identifiable {
+    case all, week, month
+
+    var id: String { rawValue }
+    static let storageKey = "historyAveragePeriod"
+
+    var label: String {
+        switch self {
+        case .all: return "ALL"
+        case .week: return "7 DAYS"
+        case .month: return "30 DAYS"
+        }
+    }
+
+    /// Nil means every record.
+    var days: Int? {
+        switch self {
+        case .all: return nil
+        case .week: return 7
+        case .month: return 30
+        }
+    }
+}
+
 /// Fourteen mornings at a time, newest on the right. Tap a column or slide
 /// across them and the box above reports that morning; with nothing selected
-/// it reports the page's averages. ‹ › page back through older fortnights —
-/// past about three weeks the columns are too thin to read, so the chart
-/// pages rather than squeezes.
+/// it reports the average over all mornings, or the last 7 or 30 days. ‹ ›
+/// page back through older fortnights — past about three weeks the columns
+/// are too thin to read, so the chart pages rather than squeezes.
 struct MorningColumnsSection: View {
     let metrics: MorningMetrics
     var now: Date = Date()
     let onOpenRun: (Date) -> Void
 
     @AppStorage(FillTheme.storageKey) private var fillThemeRaw = FillTheme.default.rawValue
+    @AppStorage(HistoryAveragePeriod.storageKey) private var periodRaw = HistoryAveragePeriod.all.rawValue
     /// 0 is the fortnight ending today; 1 the one before it.
     @State private var page = 0
     @State private var selected: Int?
 
     static let daysPerPage = 14
 
+    private var period: HistoryAveragePeriod { HistoryAveragePeriod(rawValue: periodRaw) ?? .all }
+
+    /// Averages over the chosen window, whichever fortnight is on screen.
+    private var windowAverages: MorningColumnAverages {
+        let calendar = metrics.calendar
+        let cutoff = period.days.flatMap { calendar.date(byAdding: .day, value: -$0, to: calendar.startOfDay(for: now)) }
+        let records = metrics.records.filter { record in cutoff.map { record.day >= $0 } ?? true }
+        return MorningColumnAverages(records.map { MorningColumn(record: $0, currentGoal: metrics.settings.targetWakeMinutes) })
+    }
+
     private var tint: Color { (FillTheme(rawValue: fillThemeRaw) ?? .default).color }
+    private var kind: RoutineKind { metrics.kind }
 
     private var lastDay: Date {
         metrics.calendar.date(byAdding: .day, value: -page * Self.daysPerPage, to: now) ?? now
@@ -171,19 +215,23 @@ struct MorningColumnsSection: View {
                 MorningColumnsChart(
                     columns: columns, scale: scale, tint: tint,
                     selection: $selected,
+                    kind: kind,
                     label: { Self.dayNumber.string(from: $0.day) }
                 )
-                MorningColumnsLegend(tint: tint)
+                MorningColumnsLegend(tint: tint, kind: kind)
             }
             .padding(.vertical, 8)
         } header: {
+            // No "Mornings" / "Nights" here: the switch at the top of the
+            // page already says which. Just the fortnight and its pager.
             HStack {
-                Text("Mornings")
                 Spacer()
                 pager(columns)
             }
         } footer: {
-            Text("The clock runs down the page, so earlier is higher. A cap is when you woke, the thin line is how long until you started, the box is the routine. An empty column is a missed day.")
+            Text(kind == .night
+                 ? "The clock runs down the page, so earlier is higher. The dotted line is how late you started against your goal, the cap is when you started, the box is the routine. An empty column is a missed night."
+                 : "The clock runs down the page, so earlier is higher. A cap is when you woke, the thin line is how long until you started, the box is the routine. An empty column is a missed day.")
         }
     }
 
@@ -191,28 +239,38 @@ struct MorningColumnsSection: View {
 
     private func readout(_ columns: [MorningColumn]) -> some View {
         let column = selected.flatMap { columns.indices.contains($0) ? columns[$0] : nil }
-        let averages = MorningColumnAverages(columns)
+        let averages = windowAverages
 
         return VStack(alignment: .leading, spacing: 10) {
+            // A fixed height whatever sits at the right — the period switch
+            // with nothing selected, OPEN RUN › with a day — so selecting a
+            // day never moves the chart beneath.
             HStack {
                 Text(title(column, averages))
                     .font(.system(size: 11, weight: .semibold))
                     .tracking(1.6)
-                Spacer()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 8)
                 if let start = column?.sessionStart {
                     Button { onOpenRun(start) } label: {
                         Text("OPEN RUN ›")
                             .font(.system(size: 10, weight: .semibold))
                             .tracking(1.4)
                             .foregroundStyle(.primary)
-                            .padding(.vertical, 6)
                     }
                     .buttonStyle(.plain)
+                } else if column == nil {
+                    periodSwitch
                 }
             }
+            .frame(height: 24)
             HStack(alignment: .top, spacing: 18) {
-                stat("Woke", (column == nil ? averages.wake : column?.wake).map(MorningColumnsChart.clockText) ?? "—")
-                stat("To start", (column == nil ? averages.lag : column?.lag).map(Self.span) ?? "—")
+                // At night the cap *is* the start, so there is no gap to report.
+                stat(kind == .night ? "Started" : "Woke", (column == nil ? averages.wake : column?.wake).map(MorningColumnsChart.clockText) ?? "—")
+                if kind == .morning {
+                    stat("To start", (column == nil ? averages.lag : column?.lag).map(Self.span) ?? "—")
+                }
                 stat("Routine", (column == nil ? averages.routine : column?.routineMinutes).map { "\($0) MIN" } ?? "—", color: tint)
             }
         }
@@ -227,7 +285,36 @@ struct MorningColumnsSection: View {
             let day = Self.longDay.string(from: column.day).uppercased()
             return column.hasAnything ? day : "\(day) · NOTHING LOGGED"
         }
-        return averages.count == 0 ? "NOTHING LOGGED THESE TWO WEEKS" : "AVERAGE OF \(averages.count) MORNING\(averages.count == 1 ? "" : "S")"
+        // The pills beside it finish the sentence: AVERAGE OF · ALL,
+        // AVERAGE OF · 7 DAYS. Spelling the window out here as well ran the
+        // row past the card's edge and truncated both halves.
+        return averages.count == 0 ? "NOTHING LOGGED" : "AVERAGE OF"
+    }
+
+    /// ALL | 7 DAYS | 30 DAYS, in the same small-caps register as the title.
+    private var periodSwitch: some View {
+        HStack(spacing: 4) {
+            ForEach(HistoryAveragePeriod.allCases) { option in
+                let isOn = option == period
+                Button { periodRaw = option.rawValue } label: {
+                    Text(option.label)
+                        .font(.system(size: 9, weight: .semibold))
+                        .tracking(1.1)
+                        .foregroundStyle(isOn ? Color(.systemBackground) : Color.primary.opacity(0.55))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background {
+                            if isOn {
+                                Capsule().fill(Color.primary)
+                            } else {
+                                Capsule().strokeBorder(Color.primary.opacity(0.25), lineWidth: 1)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+            }
+        }
     }
 
     private func stat(_ label: String, _ value: String, color: Color = .primary) -> some View {

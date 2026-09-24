@@ -32,7 +32,7 @@ struct RunSheetView: View {
 
     @Query(sort: \RoutineSession.startedAt, order: .reverse) private var sessions: [RoutineSession]
 
-    private var stats: RoutineStats { RoutineStats(sessions: sessions.map(\.result)) }
+    private var stats: RoutineStats { RoutineStats(sessions: sessions.results(of: engine.kind ?? .morning)) }
     private var theme: FillTheme { FillTheme(rawValue: fillThemeRaw) ?? .default }
 
     var body: some View {

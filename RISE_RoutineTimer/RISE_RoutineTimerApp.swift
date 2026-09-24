@@ -9,6 +9,7 @@ import SwiftUI
 import SwiftData
 import CoreText
 import UIKit
+import UserNotifications
 
 @main
 struct RISE_RoutineTimerApp: App {
@@ -19,6 +20,9 @@ struct RISE_RoutineTimerApp: App {
     @State private var engine: RoutineEngine
     @State private var navigation = AppNavigation()
     private let alertCoordinator: RoutineAlertCoordinator
+    /// Held for the life of the app: the notification centre keeps only a
+    /// weak reference to its delegate.
+    private let notificationPresenter = NotificationPresenter()
 
     private let sharedModelContainer: ModelContainer
 
@@ -40,8 +44,10 @@ struct RISE_RoutineTimerApp: App {
         alertCoordinator = RoutineAlertCoordinator(
             engine: engine,
             // Starting the routine means you are up, whether or not "I'm
-            // awake" was tapped first.
-            runStarted: { morningLog.recordWakeImplied(byRoutineStartingAt: $0, settings: .stored()) },
+            // awake" was tapped first. (The store ignores a night run.)
+            runStarted: { start, kind in
+                morningLog.recordWakeImplied(byRoutineStartingAt: start, kind: kind, settings: .stored())
+            },
             recordSession: { recorder.record($0) }
         )
 
@@ -52,6 +58,11 @@ struct RISE_RoutineTimerApp: App {
         AppServices.engine = engine
         AppServices.container = sharedModelContainer
         AppServices.navigation = navigation
+
+        UNUserNotificationCenter.current().delegate = notificationPresenter
+        // Scheduled from launch, not only from Settings, so it exists
+        // without anyone having to go and switch it on.
+        RoutineNotificationManager.syncNightReminder()
     }
 
     var body: some Scene {

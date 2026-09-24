@@ -24,7 +24,7 @@ enum RoutineNotificationManager {
     }
 
     private static let runPrefix = "rise-run-"
-    private static let reminderIdentifier = "rise-daily-reminder"
+    static let reminderIdentifier = "rise-daily-reminder"
 
     /// Every change to the run's alerts goes through this one queue, in the
     /// order it was asked for.
@@ -83,11 +83,53 @@ enum RoutineNotificationManager {
         }
     }
 
+    static let nightReminderIdentifier = "rise-night-reminder"
+
+    /// Puts the night reminder in line with what is saved. Called at every
+    /// launch, not only when the switch or the goal changes in Settings —
+    /// that was the other half of it never firing: nothing scheduled it
+    /// unless Settings was visited and touched.
+    static func syncNightReminder(defaults: UserDefaults = .standard) {
+        scheduleNightReminder(atMinutesAfterMidnight: NightSettings.storedReminderEnabled(in: defaults)
+            ? NightSettings.storedTargetStart(in: defaults)
+            : nil)
+    }
+
+    /// A repeating nudge at the night goal — the time the night routine was
+    /// meant to begin — or nothing. Separate from the morning's start-by
+    /// reminder, which is derived from the finish-by target and the plan;
+    /// this one is the goal itself. Goes through the queue so `settle()`
+    /// covers it, which is what lets the test read it back.
+    static func scheduleNightReminder(atMinutesAfterMidnight minutes: Int?) {
+        let clock = minutes.map {
+            TimeFormatting.shortClockTime(from: Calendar.current.startOfDay(for: Date()).addingTimeInterval(TimeInterval($0 * 60)))
+        }
+        enqueue {
+            let center = UNUserNotificationCenter.current()
+            center.removePendingNotificationRequests(withIdentifiers: [nightReminderIdentifier])
+            guard let minutes, let clock else { return }
+
+            let content = UNMutableNotificationContent()
+            content.title = "Time for your night routine"
+            content.body = "It's \(clock) — start now to begin on time."
+            content.sound = .default
+            var components = DateComponents()
+            components.hour = minutes / 60
+            components.minute = minutes % 60
+            let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
+            do {
+                try await center.add(UNNotificationRequest(identifier: nightReminderIdentifier, content: content, trigger: trigger))
+            } catch {
+                print("Could not schedule the night reminder: \(error)")
+            }
+        }
+    }
+
     static func clearDelivered() {
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
     }
 
-    static func schedule(_ alerts: [PlannedAlert], steps: [RunStep], now: Date = Date()) {
+    static func schedule(_ alerts: [PlannedAlert], steps: [RunStep], kind: RoutineKind = .morning, now: Date = Date()) {
         enqueue {
             await removePendingRunAlerts()
 
@@ -121,7 +163,7 @@ enum RoutineNotificationManager {
                 case .completion:
                     identifier = "\(pass)complete"
                     content.title = "Routine complete"
-                    content.body = "Nice work. Your morning routine is finished."
+                    content.body = "Nice work. Your \(kind.noun) routine is finished."
                 }
 
                 let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
